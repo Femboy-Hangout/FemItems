@@ -5,6 +5,7 @@ import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
+import org.bukkit.enchantments.Enchantment;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Entity;
@@ -15,10 +16,14 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityDeathEvent;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.ItemMeta;
+import org.bukkit.inventory.meta.EnchantmentStorageMeta;
 import org.bukkit.inventory.ShapedRecipe;
 import org.bukkit.inventory.ShapelessRecipe;
 import org.bukkit.inventory.Recipe;
 import org.bukkit.plugin.java.JavaPlugin;
+import io.papermc.paper.registry.RegistryAccess;
+import io.papermc.paper.registry.RegistryKey;
 import io.papermc.paper.command.brigadier.CommandSourceStack;
 import io.papermc.paper.command.brigadier.Commands;
 import io.papermc.paper.plugin.lifecycle.event.types.LifecycleEvents;
@@ -201,11 +206,34 @@ public final class FemItemsPlugin extends JavaPlugin implements Listener {
         }
         ItemStack item = new ItemStack(material, amount);
         String name = section.getString("name");
-        if (name != null) {
-            var meta = item.getItemMeta();
-            meta.setDisplayName(name);
-            item.setItemMeta(meta);
+        ItemMeta meta = item.getItemMeta();
+        if (name != null) meta.setDisplayName(name);
+        List<String> lore = section.getStringList("lore");
+        if (!lore.isEmpty()) meta.setLore(lore);
+        if (section.getBoolean("unbreakable", false)) meta.setUnbreakable(true);
+
+        ConfigurationSection enchantments = section.getConfigurationSection("enchants");
+        if (enchantments != null) {
+            for (String enchantName : enchantments.getKeys(false)) {
+                int level = enchantments.getInt(enchantName, 0);
+                if (level < 1) throw new IllegalArgumentException("Enchant level must be at least 1 at " + path + ".enchants." + enchantName);
+                String normalizedKey = enchantName.toLowerCase(Locale.ROOT);
+                NamespacedKey enchantKey = normalizedKey.contains(":")
+                        ? NamespacedKey.fromString(normalizedKey)
+                        : NamespacedKey.minecraft(normalizedKey);
+                if (enchantKey == null) throw new IllegalArgumentException("Invalid enchantment key at " + path + ".enchants." + enchantName);
+                Enchantment enchantment = RegistryAccess.registryAccess()
+                        .getRegistry(RegistryKey.ENCHANTMENT)
+                        .get(enchantKey);
+                if (enchantment == null) throw new IllegalArgumentException("Unknown enchantment at " + path + ".enchants." + enchantName);
+                if (meta instanceof EnchantmentStorageMeta bookMeta) {
+                    bookMeta.addStoredEnchant(enchantment, level, true);
+                } else {
+                    meta.addEnchant(enchantment, level, true);
+                }
+            }
         }
+        item.setItemMeta(meta);
         return item;
     }
 

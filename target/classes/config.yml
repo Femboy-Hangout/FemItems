@@ -49,6 +49,26 @@ mobs:
       - { material: LEATHER, min: 1, max: 3, chance: 0.25 }
       - { material: IRON_AXE, min: 1, max: 1, chance: 0.05 }
 
-# Recipes are empty by default because the supplied datapack contains no recipes.
-# Add shaped or shapeless entries here; see README.md for examples.
-recipes: {}
+# The source datapack contains no recipes. This example upgrades a bow into a
+# named, enchanted Soulpiercer Bow. See README.md for shaped/shapeless syntax.
+recipes:
+  soulpiercer_bow:
+    type: shaped
+    shape:
+      - "EFS"
+      - "FBF"
+      - "SFE"
+    ingredients:
+      E: ECHO_SHARD
+      F: STRING
+      S: STICK
+      B: BOW
+    result:
+      material: BOW
+      amount: 1
+      name: "Soulpiercer Bow"
+      lore:
+        - "A bow attuned to lost souls."
+        - "Forged in the Forsaken arena."
+      enchants:
+        power: 2

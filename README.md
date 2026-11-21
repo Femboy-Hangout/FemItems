@@ -24,7 +24,7 @@ If a drop does not fire, use `/femitems debug` to toggle mob-death diagnostics, 
 
 ## Crafting recipe configuration
 
-The archive contains no crafting recipes, so `recipes` starts empty. Add recipes in this form:
+The datapack archive contains no crafting recipes. FemItems includes a Soulpiercer Bow example recipe in its default config; add other recipes in this form:
 
 ```yaml
 recipes:
@@ -52,6 +52,34 @@ Each string in `shape` is one crafting-grid row, read left to right. Every chara
 ```
 
 The `ingredients` section tells the plugin which material each letter represents. The `result` section tells it what item to craft. For a normal iron sword, the three rows are ingot, ingot, stick; the centered spaces make that pattern line up like a sword in the 3×3 crafting grid.
+
+Recipe results can also have `lore` (a list of text lines), `enchants` (enchantment IDs mapped to levels), and `unbreakable: true`. Enchantment IDs use Minecraft names such as `power`, or fully namespaced IDs such as `minecraft:power`. Levels are applied as configured, including levels above the normal maximum. Enchanted book results store the configured enchantments as book enchantments.
+
+The default config includes this Soulpiercer Bow recipe. It takes an existing bow, two echo shards, two sticks, and four string, then crafts a named bow with lore and Power II:
+
+```yaml
+recipes:
+  soulpiercer_bow:
+    type: shaped
+    shape:
+      - "EFS"
+      - "FBF"
+      - "SFE"
+    ingredients:
+      E: ECHO_SHARD
+      F: STRING
+      S: STICK
+      B: BOW
+    result:
+      material: BOW
+      amount: 1
+      name: "Soulpiercer Bow"
+      lore:
+        - "A bow attuned to lost souls."
+        - "Forged in the Forsaken arena."
+      enchants:
+        power: 2
+```
 
 For a shapeless recipe, use `type: shapeless` and make `ingredients` a list of material names:
 
