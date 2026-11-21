@@ -49,18 +49,17 @@ mobs:
       - { material: LEATHER, min: 1, max: 3, chance: 0.25 }
       - { material: IRON_AXE, min: 1, max: 1, chance: 0.05 }
 
-# The source datapack contains no recipes. This example upgrades a bow into a
-# named, enchanted Soulpiercer Bow. See README.md for shaped/shapeless syntax.
+# These examples use shaped recipes, ordinary materials, and item metadata.
 recipes:
   soulpiercer_bow:
     type: shaped
     shape:
-      - "EFS"
-      - "FBF"
-      - "SFE"
+      - "ETS"
+      - "TBT"
+      - "STE"
     ingredients:
       E: ECHO_SHARD
-      F: STRING
+      T: STRING
       S: STICK
       B: BOW
     result:
@@ -69,6 +68,127 @@ recipes:
       name: "Soulpiercer Bow"
       lore:
         - "A bow attuned to lost souls."
-        - "Forged in the Forsaken arena."
       enchants:
         power: 2
+
+  emberblade:
+    type: shaped
+    shape:
+      - "BM"
+      - "S "
+    ingredients:
+      B: BLAZE_POWDER
+      M: MAGMA_CREAM
+      S: IRON_SWORD
+    result:
+      material: IRON_SWORD
+      name: "Emberblade"
+      lore:
+        - "A blade warmed by the Nether."
+      enchants:
+        fire_aspect: 1
+
+  warlords_axe:
+    type: shaped
+    shape:
+      - "GIG"
+      - "DAD"
+      - " I "
+    ingredients:
+      G: GOLD_INGOT
+      I: IRON_INGOT
+      D: DIAMOND
+      A: DIAMOND_AXE
+    result:
+      material: DIAMOND_AXE
+      name: "Warlord's Axe"
+      lore:
+        - "A finely reinforced battle axe."
+      enchants:
+        sharpness: 2
+        unbreaking: 1
+
+  aegis_shield:
+    type: shaped
+    shape:
+      - "AAI"
+      - " S "
+    ingredients:
+      A: AMETHYST_SHARD
+      I: IRON_BLOCK
+      S: SHIELD
+    result:
+      material: SHIELD
+      name: "Aegis Shield"
+      lore:
+        - "Reinforced to endure repeated blows."
+      enchants:
+        unbreaking: 2
+
+  prospectors_pick:
+    type: shaped
+    shape:
+      - "GAG"
+      - " P "
+    ingredients:
+      G: GOLD_INGOT
+      A: AMETHYST_SHARD
+      P: DIAMOND_PICKAXE
+    result:
+      material: DIAMOND_PICKAXE
+      name: "Prospector's Pick"
+      lore:
+        - "A precise tool for careful mining."
+      enchants:
+        efficiency: 2
+
+  cloudstep_boots:
+    type: shaped
+    shape:
+      - "FFM"
+      - " B "
+    ingredients:
+      F: FEATHER
+      M: PHANTOM_MEMBRANE
+      B: IRON_BOOTS
+    result:
+      material: IRON_BOOTS
+      name: "Cloudstep Boots"
+      lore:
+        - "Made for a lighter landing."
+      enchants:
+        feather_falling: 2
+
+  wayfarers_saddle:
+    type: shaped
+    shape:
+      - "LLL"
+      - "ISI"
+      - "L L"
+    ingredients:
+      L: LEATHER
+      I: IRON_INGOT
+      S: STRING
+    result:
+      material: SADDLE
+      name: "Wayfarer's Saddle"
+      lore:
+        - "A sturdy saddle for long journeys."
+
+  heartwood_bow:
+    type: shaped
+    shape:
+      - "GTG"
+      - "TB "
+    ingredients:
+      G: GOLD_INGOT
+      T: STRING
+      B: BOW
+    result:
+      material: BOW
+      name: "Heartwood Bow"
+      lore:
+        - "Balanced for steady shots."
+      enchants:
+        power: 1
+        unbreaking: 1

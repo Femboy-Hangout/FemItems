@@ -24,7 +24,7 @@ If a drop does not fire, use `/femitems debug` to toggle mob-death diagnostics, 
 
 ## Crafting recipe configuration
 
-The datapack archive contains no crafting recipes. FemItems includes a Soulpiercer Bow example recipe in its default config; add other recipes in this form:
+The datapack archive contains no crafting recipes. FemItems' default config now includes Soulpiercer Bow, Emberblade, Warlord's Axe, Aegis Shield, Prospector's Pick, Cloudstep Boots, Wayfarer's Saddle, and Heartwood Bow. You can add other recipes in this form:
 
 ```yaml
 recipes:
@@ -40,7 +40,7 @@ recipes:
     result:
       material: IRON_SWORD
       amount: 1
-      name: "Arena Blade"
+      name: "Tempered Blade"
 ```
 
 Each string in `shape` is one crafting-grid row, read left to right. Every character is one slot. Here, `I` is an iron ingot, `S` is a stick, and a space means the slot is empty:
@@ -55,19 +55,19 @@ The `ingredients` section tells the plugin which material each letter represents
 
 Recipe results can also have `lore` (a list of text lines), `enchants` (enchantment IDs mapped to levels), and `unbreakable: true`. Enchantment IDs use Minecraft names such as `power`, or fully namespaced IDs such as `minecraft:power`. Levels are applied as configured, including levels above the normal maximum. Enchanted book results store the configured enchantments as book enchantments.
 
-The default config includes this Soulpiercer Bow recipe. It takes an existing bow, two echo shards, two sticks, and four string, then crafts a named bow with lore and Power II:
+The default config uses a shaped recipe for Soulpiercer Bow. It takes an existing bow, two echo shards, two sticks, and four string, then crafts a named bow with lore and Power II:
 
 ```yaml
 recipes:
   soulpiercer_bow:
     type: shaped
     shape:
-      - "EFS"
-      - "FBF"
-      - "SFE"
+      - "ETS"
+      - "TBT"
+      - "STE"
     ingredients:
       E: ECHO_SHARD
-      F: STRING
+      T: STRING
       S: STICK
       B: BOW
     result:
@@ -76,12 +76,11 @@ recipes:
       name: "Soulpiercer Bow"
       lore:
         - "A bow attuned to lost souls."
-        - "Forged in the Forsaken arena."
       enchants:
         power: 2
 ```
 
-For a shapeless recipe, use `type: shapeless` and make `ingredients` a list of material names:
+For a shapeless recipe, use `type: shapeless` and make `ingredients` a list of material names. Repeated names represent separate crafting-grid slots; a recipe can use up to nine ingredients:
 
 ```yaml
   example_mix:
