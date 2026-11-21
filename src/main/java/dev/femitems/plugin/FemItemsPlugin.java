@@ -15,6 +15,7 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityDeathEvent;
+import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.inventory.meta.EnchantmentStorageMeta;
@@ -103,6 +104,7 @@ public final class FemItemsPlugin extends JavaPlugin implements Listener {
                     recipeKeys.add(keyOf(recipe));
                 }
             }
+            Bukkit.getOnlinePlayers().forEach(this::discoverRecipes);
             getLogger().info("Loaded " + mobRules.size() + " mob rules and " + recipeKeys.size() + " recipes.");
             return null;
         } catch (Exception exception) {
@@ -240,6 +242,15 @@ public final class FemItemsPlugin extends JavaPlugin implements Listener {
     private void removeRegisteredRecipes() {
         for (NamespacedKey key : recipeKeys) Bukkit.removeRecipe(key);
         recipeKeys.clear();
+    }
+
+    @EventHandler
+    public void onPlayerJoin(PlayerJoinEvent event) {
+        discoverRecipes(event.getPlayer());
+    }
+
+    private void discoverRecipes(Player player) {
+        if (!recipeKeys.isEmpty()) player.discoverRecipes(recipeKeys);
     }
 
     @EventHandler

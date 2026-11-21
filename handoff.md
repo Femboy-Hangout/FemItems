@@ -11,6 +11,7 @@ Build a Java 25 Maven native Paper plugin named FemItems for Minecraft 26.3 that
 - `FemItemsPlugin` adds configured drops when a matching entity dies, while preserving vanilla drops.
 - `/femitems reload` and `/femi reload` reload `config.yml` and recipes. Permission: `femitems.reload`.
 - Shaped and shapeless recipes are supported, removed on plugin disable/reload, and namespaced under this plugin.
+- Registered recipes are sent to online clients and unlocked in each player's recipe book on join and after config reload.
 - Recipe results support display name, lore, unsafe configured enchantment levels, and unbreakable state. Default config includes Soulpiercer Bow, Emberblade, Warlord's Axe, Aegis Shield, Prospector's Pick, Cloudstep Boots, Wayfarer's Saddle, and Heartwood Bow.
 - Mob rules accept `entity: ANY` to ignore base entity type. `/femitems debug` toggles console output with actual death entity type, custom name, and matching mob rule IDs.
 - Default `config.yml` maps the five archive tables to arena entities based on inferred entity types/custom names. Verify those assumptions against the server's actual mob types/names.

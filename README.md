@@ -92,3 +92,5 @@ For a shapeless recipe, use `type: shapeless` and make `ingredients` a list of m
 ```
 
 Recipe IDs should be unique and use lowercase letters, digits, underscores, or hyphens. Ingredients and results currently use vanilla Bukkit materials; custom plugin items are not implemented.
+
+FemItems automatically unlocks its configured recipes in each player's recipe book when they join. Players already online see new or reloaded recipes unlocked immediately.
