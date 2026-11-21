@@ -11,6 +11,7 @@ Build a Java 25 Maven native Paper plugin named FemItems for Minecraft 26.3 that
 - `FemItemsPlugin` adds configured drops when a matching entity dies, while preserving vanilla drops.
 - `/femitems reload` and `/femi reload` reload `config.yml` and recipes. Permission: `femitems.reload`.
 - Shaped and shapeless recipes are supported, removed on plugin disable/reload, and namespaced under this plugin.
+- Mob rules accept `entity: ANY` to ignore base entity type. `/femitems debug` toggles console output with actual death entity type, custom name, and matching mob rule IDs.
 - Default `config.yml` maps the five archive tables to arena entities based on inferred entity types/custom names. Verify those assumptions against the server's actual mob types/names.
 - `README.md` contains build, install, config, and recipe examples.
 
@@ -22,7 +23,7 @@ The default plugin config preserves the listed items, random count ranges, drop 
 
 ## Next actions
 
-1. Confirm the actual base entity and custom name for Archer, Grunt, Champion, and Dreadbound, then update `config.yml` defaults if needed.
+1. Use `/femitems debug` on the server to confirm entity types/custom names for arena mobs, then adjust the server's generated config if needed. Editing bundled defaults does not overwrite an existing `plugins/FemItems/config.yml`.
 2. Decide whether the enchanted book/sword drops need true random vanilla enchantments; if so, implement against the exact 26.3 API and add configurable enchantment options.
 3. Build using Java 25/Maven and install on a 26.3 Paper test server. The current work was not built or tested.
 4. If PlugManX hot reload is still required, investigate whether PlugManX can reload a native Paper plugin. Native Paper plugins use Paper's separate experimental plugin loader; do not assume standard Bukkit plugin-manager reload is supported.

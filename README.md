@@ -16,9 +16,11 @@ The project compiles against the Paper 26.3 API and uses Paper's native plugin d
 
 ## Mob drop configuration
 
-Each `mobs` entry has an `entity` (Bukkit entity type), optional `name-contains` (case-insensitive substring of the mob's custom name), and a list of `drops`. Set `name-contains: ""` to match all mobs of that entity type. Drops are added to vanilla drops. Each drop supports `material`, `min`, `max`, `chance` (0.0 through 1.0), and optional `name`.
+Each `mobs` entry has an `entity` (Bukkit entity type, or `ANY`), optional `name-contains` (case-insensitive substring of the mob's custom name), and a list of `drops`. `ANY` skips only the base entity-type check; the name filter still applies, and it must be non-empty for `ANY`. For example, `entity: ANY` with `name-contains: "Champion"` matches any entity type whose custom name contains “Champion.” Drops are added to vanilla drops. Each drop supports `material`, `min`, `max`, `chance` (0.0 through 1.0), and optional `name`.
 
-The supplied archive's five loot tables have been converted into the default config. The assumed entity mappings are Skeleton/Archer, Zombie/Grunt, Pillager/Champion, Zombie/Dreadbound, and Ravager (any custom name). Change these entity and name matches to match the arena's actual mobs. The archive did not specify those mappings.
+The supplied archive's five loot tables have been converted into the default config. The assumed entity mappings are Skeleton/Archer and Zombie/Grunt; Champion, Dreadbound, and Ravager use `ANY` plus their custom-name substring because their base entity types were not specified. Change these matches to fit the arena's actual mobs. The archive did not specify those mappings.
+
+If a drop does not fire, use `/femitems debug` to toggle mob-death diagnostics, kill one affected mob, then check the server console for its actual entity type, custom name, and matching rule IDs. Run `/femitems debug` again to turn diagnostics off. Set `entity: ANY` when the reported type differs from the configured one, and adjust `name-contains` to match the reported custom name. Reload config with `/femitems reload`.
 
 ## Crafting recipe configuration
 

@@ -1,6 +1,7 @@
 # Mob drops are additional to the mob's vanilla drops.
-# entity: Bukkit EntityType; name-contains: case-insensitive custom name substring.
-# Set name-contains to "" to match any entity of that type.
+# entity: Bukkit EntityType, or ANY to match any base entity type.
+# name-contains: case-insensitive custom name substring; set to "" to ignore the name
+# only when entity is a specific type. ANY requires a non-empty name filter.
 mobs:
   archer:
     entity: SKELETON
@@ -19,7 +20,7 @@ mobs:
       - { material: COAL, min: 1, max: 2, chance: 0.15 }
       - { material: IRON_SWORD, min: 1, max: 1, chance: 0.03 }
   champion:
-    entity: PILLAGER
+    entity: ANY
     name-contains: "Champion"
     drops:
       - { material: GOLD_INGOT, min: 3, max: 6, chance: 1.0 }
@@ -30,7 +31,7 @@ mobs:
       - { material: NETHERITE_SCRAP, min: 1, max: 1, chance: 0.10 }
       - { material: ECHO_SHARD, min: 1, max: 1, chance: 0.05, name: "Champion's Trophy" }
   dreadbound:
-    entity: ZOMBIE
+    entity: ANY
     name-contains: "Dreadbound"
     drops:
       - { material: GOLD_INGOT, min: 1, max: 3, chance: 0.60 }
@@ -40,8 +41,8 @@ mobs:
       - { material: IRON_SWORD, min: 1, max: 1, chance: 0.05 }
       - { material: DIAMOND, min: 1, max: 1, chance: 0.03 }
   ravager:
-    entity: RAVAGER
-    name-contains: ""
+    entity: ANY
+    name-contains: "Ravager"
     drops:
       - { material: EMERALD, min: 1, max: 2, chance: 0.35 }
       - { material: IRON_INGOT, min: 1, max: 2, chance: 0.30 }
