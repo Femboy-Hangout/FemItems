@@ -57,7 +57,7 @@ If a drop does not fire, use `/femitems debug` to toggle mob-death diagnostics, 
 
 ## Crafting recipe configuration
 
-The archive contains no crafting recipes, so `recipes` starts empty. Add recipes in this form:
+The datapack archive contains no crafting recipes. FemItems' default config now includes Soulpiercer Bow, Emberblade, Warlord's Axe, Aegis Shield, Prospector's Pick, Cloudstep Boots, Wayfarer's Saddle, and Heartwood Bow. You can add other recipes in this form:
 
 ```yaml
 recipes:
@@ -73,7 +73,7 @@ recipes:
     result:
       material: IRON_SWORD
       amount: 1
-      name: "Arena Blade"
+      name: "Tempered Blade"
 ```
 
 Each string in `shape` is one crafting-grid row, read left to right. Every character is one slot. Here, `I` is an iron ingot, `S` is a stick, and a space means the slot is empty:
@@ -86,7 +86,34 @@ Each string in `shape` is one crafting-grid row, read left to right. Every chara
 
 The `ingredients` section tells the plugin which material each letter represents. The `result` section tells it what item to craft. For a normal iron sword, the three rows are ingot, ingot, stick; the centered spaces make that pattern line up like a sword in the 3×3 crafting grid.
 
-For a shapeless recipe, use `type: shapeless` and make `ingredients` a list of material names:
+Recipe results can also have `lore` (a list of text lines), `enchants` (enchantment IDs mapped to levels), and `unbreakable: true`. Use Minecraft color codes with `&` in names and lore, such as `&5` for purple or `&l` for bold. Enchantment IDs use Minecraft names such as `power`, or fully namespaced IDs such as `minecraft:power`. Levels are applied as configured, including levels above the normal maximum. Enchanted book results store the configured enchantments as book enchantments.
+
+The default config uses a shaped recipe for Soulpiercer Bow. It takes an existing bow, two echo shards, two sticks, and four string, then crafts a named bow with lore and Power II:
+
+```yaml
+recipes:
+  soulpiercer_bow:
+    type: shaped
+    shape:
+      - "ETS"
+      - "TBT"
+      - "STE"
+    ingredients:
+      E: ECHO_SHARD
+      T: STRING
+      S: STICK
+      B: BOW
+    result:
+      material: BOW
+      amount: 1
+      name: "Soulpiercer Bow"
+      lore:
+        - "A bow attuned to lost souls."
+      enchants:
+        power: 2
+```
+
+For a shapeless recipe, use `type: shapeless` and make `ingredients` a list of material names. Repeated names represent separate crafting-grid slots; a recipe can use up to nine ingredients:
 
 ```yaml
   example_mix:
@@ -98,3 +125,5 @@ For a shapeless recipe, use `type: shapeless` and make `ingredients` a list of m
 ```
 
 Recipe IDs should be unique and use lowercase letters, digits, underscores, or hyphens. Ingredients and results currently use vanilla Bukkit materials; custom plugin items are not implemented.
+
+FemItems automatically unlocks its configured recipes in each player's recipe book when they join. Players already online see new or reloaded recipes unlocked immediately.

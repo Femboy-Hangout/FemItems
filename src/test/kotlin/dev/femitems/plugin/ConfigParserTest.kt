@@ -1,6 +1,7 @@
 package dev.femitems.plugin
 
 import org.bukkit.Material
+import org.bukkit.NamespacedKey
 import org.bukkit.configuration.file.YamlConfiguration
 import org.bukkit.entity.EntityType
 import org.junit.jupiter.api.Test
@@ -18,10 +19,32 @@ class ConfigParserTest {
 
     private val testMaxStackSize: (Material) -> Int = { material ->
         when (material) {
-            Material.IRON_SWORD, Material.DIAMOND_SWORD, Material.BOW, Material.IRON_AXE -> 1
+            Material.IRON_SWORD,
+            Material.DIAMOND_SWORD,
+            Material.BOW,
+            Material.IRON_AXE,
+            Material.DIAMOND_AXE,
+            Material.SHIELD,
+            Material.DIAMOND_PICKAXE,
+            Material.IRON_BOOTS,
+            Material.SADDLE,
+            Material.ENCHANTED_BOOK,
+            -> 1
+
             else -> 64
         }
     }
+
+    private val knownEnchants: Set<NamespacedKey> = setOf(
+        NamespacedKey.minecraft("power"),
+        NamespacedKey.minecraft("fire_aspect"),
+        NamespacedKey.minecraft("sharpness"),
+        NamespacedKey.minecraft("unbreaking"),
+        NamespacedKey.minecraft("efficiency"),
+        NamespacedKey.minecraft("feather_falling"),
+    )
+
+    private val testEnchantmentValidator: (NamespacedKey) -> Boolean = { it in knownEnchants }
 
     @Test
     fun `bundled default config parses cleanly`() {
@@ -32,10 +55,23 @@ class ConfigParserTest {
             YamlConfiguration.loadConfiguration(reader)
         }
 
-        val parsed = ConfigParser.parse(yaml, testMaxStackSize)
+        val parsed = ConfigParser.parse(yaml, testMaxStackSize, testEnchantmentValidator)
 
         assertEquals(5, parsed.mobRules.size)
-        assertTrue(parsed.recipes.isEmpty())
+        assertEquals(8, parsed.recipes.size)
+        assertEquals(
+            listOf(
+                "soulpiercer_bow",
+                "emberblade",
+                "warlords_axe",
+                "aegis_shield",
+                "prospectors_pick",
+                "cloudstep_boots",
+                "wayfarers_saddle",
+                "heartwood_bow",
+            ),
+            parsed.recipes.map(RecipeDefinition::id),
+        )
 
         val archer = parsed.mobRules.first { it.id == "archer" }
         assertEquals(EntityType.SKELETON, archer.type)
@@ -46,11 +82,22 @@ class ConfigParserTest {
         assertNull(champion.type)
         assertEquals("Champion", champion.nameContains)
         val trophy = champion.drops.first { it.material == Material.ECHO_SHARD }
-        assertEquals("Champion's Trophy", trophy.name)
+        assertEquals("&6Champion's Trophy", trophy.name)
+
+        val soulpiercer = parsed.recipes.first { it.id == "soulpiercer_bow" } as ShapedRecipeDefinition
+        assertEquals(Material.BOW, soulpiercer.result.material)
+        assertEquals("&5Soulpiercer Bow", soulpiercer.result.name)
+        assertEquals(listOf("A bow attuned to lost souls."), soulpiercer.result.lore)
+        assertFalse(soulpiercer.result.unbreakable)
+        assertEquals(mapOf(NamespacedKey.minecraft("power") to 2), soulpiercer.result.enchants)
+
+        val saddle = parsed.recipes.first { it.id == "wayfarers_saddle" } as ShapedRecipeDefinition
+        assertEquals(Material.SADDLE, saddle.result.material)
+        assertTrue(saddle.result.enchants.isEmpty())
     }
 
     @Test
-    fun `shaped and shapeless recipes parse properly`() {
+    fun `shaped and shapeless recipes parse properly with metadata`() {
         val yaml = YamlConfiguration().apply {
             loadFromString(
                 """
@@ -68,7 +115,14 @@ class ConfigParserTest {
                     result:
                       material: IRON_SWORD
                       amount: 1
-                      name: "Arena Blade"
+                      name: "&6Arena Blade"
+                      lore:
+                        - "&7Forged in the arena."
+                        - "&eHandles heavy blows."
+                      unbreakable: true
+                      enchants:
+                        sharpness: 10
+                        minecraft:unbreaking: 5
                   gem_mix:
                     type: shapeless
                     ingredients: [DIAMOND, EMERALD]
@@ -79,7 +133,7 @@ class ConfigParserTest {
             )
         }
 
-        val parsed = ConfigParser.parse(yaml, testMaxStackSize)
+        val parsed = ConfigParser.parse(yaml, testMaxStackSize, testEnchantmentValidator)
 
         assertEquals(2, parsed.recipes.size)
 
@@ -89,7 +143,16 @@ class ConfigParserTest {
         assertEquals(mapOf('I' to Material.IRON_INGOT, 'S' to Material.STICK), shaped.ingredients)
         assertEquals(Material.IRON_SWORD, shaped.result.material)
         assertEquals(1, shaped.result.amount)
-        assertEquals("Arena Blade", shaped.result.name)
+        assertEquals("&6Arena Blade", shaped.result.name)
+        assertEquals(listOf("&7Forged in the arena.", "&eHandles heavy blows."), shaped.result.lore)
+        assertTrue(shaped.result.unbreakable)
+        assertEquals(
+            mapOf(
+                NamespacedKey.minecraft("sharpness") to 10,
+                NamespacedKey.minecraft("unbreaking") to 5,
+            ),
+            shaped.result.enchants,
+        )
 
         val shapeless = parsed.recipes[1] as ShapelessRecipeDefinition
         assertEquals("gem_mix", shapeless.id)
@@ -97,6 +160,85 @@ class ConfigParserTest {
         assertEquals(Material.ECHO_SHARD, shapeless.result.material)
         assertEquals(2, shapeless.result.amount)
         assertNull(shapeless.result.name)
+        assertTrue(shapeless.result.lore.isEmpty())
+        assertFalse(shapeless.result.unbreakable)
+        assertTrue(shapeless.result.enchants.isEmpty())
+    }
+
+    @Test
+    fun `rejects invalid enchantment levels, malformed keys, unknown enchants, and oversized shapeless recipes`() {
+        val zeroLevel = YamlConfiguration().apply {
+            loadFromString(
+                """
+                recipes:
+                  bad_level:
+                    type: shapeless
+                    ingredients: [DIAMOND]
+                    result:
+                      material: DIAMOND_SWORD
+                      enchants:
+                        sharpness: 0
+                """.trimIndent(),
+            )
+        }
+        val zeroEx = assertThrows<IllegalArgumentException> {
+            ConfigParser.parse(zeroLevel, testMaxStackSize, testEnchantmentValidator)
+        }
+        assertTrue(zeroEx.message.orEmpty().contains("Enchant level must be at least 1"))
+
+        val invalidKey = YamlConfiguration().apply {
+            loadFromString(
+                """
+                recipes:
+                  bad_key:
+                    type: shapeless
+                    ingredients: [DIAMOND]
+                    result:
+                      material: DIAMOND_SWORD
+                      enchants:
+                        "bad key!": 1
+                """.trimIndent(),
+            )
+        }
+        val keyEx = assertThrows<IllegalArgumentException> {
+            ConfigParser.parse(invalidKey, testMaxStackSize, testEnchantmentValidator)
+        }
+        assertTrue(keyEx.message.orEmpty().contains("Invalid enchantment key"))
+
+        val unknownEnchant = YamlConfiguration().apply {
+            loadFromString(
+                """
+                recipes:
+                  unknown_enchant:
+                    type: shapeless
+                    ingredients: [DIAMOND]
+                    result:
+                      material: ENCHANTED_BOOK
+                      enchants:
+                        not_a_real_enchant: 2
+                """.trimIndent(),
+            )
+        }
+        val unknownEx = assertThrows<IllegalArgumentException> {
+            ConfigParser.parse(unknownEnchant, testMaxStackSize, testEnchantmentValidator)
+        }
+        assertTrue(unknownEx.message.orEmpty().contains("Unknown enchantment"))
+
+        val tooManyIngredients = YamlConfiguration().apply {
+            loadFromString(
+                """
+                recipes:
+                  too_many:
+                    type: shapeless
+                    ingredients: [STICK, STICK, STICK, STICK, STICK, STICK, STICK, STICK, STICK, STICK]
+                    result:
+                      material: DIAMOND
+                """.trimIndent(),
+            )
+        }
+        assertThrows<IllegalArgumentException> {
+            ConfigParser.parse(tooManyIngredients, testMaxStackSize, testEnchantmentValidator)
+        }
     }
 
     @Test
@@ -114,7 +256,9 @@ class ConfigParserTest {
             )
         }
 
-        val ex = assertThrows<IllegalArgumentException> { ConfigParser.parse(yaml, testMaxStackSize) }
+        val ex = assertThrows<IllegalArgumentException> {
+            ConfigParser.parse(yaml, testMaxStackSize, testEnchantmentValidator)
+        }
         assertTrue(ex.message.orEmpty().contains("requires a non-empty name-contains filter"))
     }
 
@@ -131,7 +275,9 @@ class ConfigParserTest {
                 """.trimIndent(),
             )
         }
-        assertThrows<IllegalArgumentException> { ConfigParser.parse(badChance, testMaxStackSize) }
+        assertThrows<IllegalArgumentException> {
+            ConfigParser.parse(badChance, testMaxStackSize, testEnchantmentValidator)
+        }
 
         val unevenShape = YamlConfiguration().apply {
             loadFromString(
@@ -150,7 +296,9 @@ class ConfigParserTest {
                 """.trimIndent(),
             )
         }
-        assertThrows<IllegalArgumentException> { ConfigParser.parse(unevenShape, testMaxStackSize) }
+        assertThrows<IllegalArgumentException> {
+            ConfigParser.parse(unevenShape, testMaxStackSize, testEnchantmentValidator)
+        }
 
         val missingIngredientSymbol = YamlConfiguration().apply {
             loadFromString(
@@ -167,7 +315,9 @@ class ConfigParserTest {
                 """.trimIndent(),
             )
         }
-        assertThrows<IllegalArgumentException> { ConfigParser.parse(missingIngredientSymbol, testMaxStackSize) }
+        assertThrows<IllegalArgumentException> {
+            ConfigParser.parse(missingIngredientSymbol, testMaxStackSize, testEnchantmentValidator)
+        }
     }
 
     @Test
@@ -188,7 +338,7 @@ class ConfigParserTest {
                 type = null,
                 nameContains = "Champion",
                 drops = listOf(
-                    DropRule(Material.GOLD_INGOT, min = 3, max = 5, chance = 1.0, name = "Arena Gold"),
+                    DropRule(Material.GOLD_INGOT, min = 3, max = 5, chance = 1.0, name = "&6Arena Gold"),
                     DropRule(Material.DIAMOND, min = 1, max = 1, chance = 0.0),
                 ),
             ),
@@ -211,11 +361,11 @@ class ConfigParserTest {
         val drop = drops.single()
         assertEquals(Material.GOLD_INGOT, drop.material)
         assertTrue(drop.amount in 3..5)
-        assertEquals("Arena Gold", drop.name)
+        assertEquals("&6Arena Gold", drop.name)
     }
 
     @Test
-    fun `semantic error line detection locates bad material and section fields`() {
+    fun `semantic error line detection locates bad material, section fields, and invalid enchants`() {
         val contents = """
             mobs:
               archer:
@@ -223,6 +373,15 @@ class ConfigParserTest {
                 name-contains: "Archer"
                 drops:
                   - { material: NOT_A_REAL_ITEM, min: 1, max: 2, chance: 0.5 }
+            recipes:
+              soulpiercer_bow:
+                type: shapeless
+                ingredients: [BOW]
+                result:
+                  material: BOW
+                  enchants:
+                    power: 2
+                    not_real: 1
         """.trimIndent()
 
         val line = ConfigParser.findSemanticErrorLine(
@@ -236,6 +395,13 @@ class ConfigParserTest {
             contents,
         )
         assertEquals(3, fieldLine)
+
+        val enchantLine = ConfigParser.findSemanticErrorLine(
+            "Unknown enchantment at recipes.soulpiercer_bow.result.enchants.not_real",
+            contents,
+        )
+        assertEquals(15, enchantLine)
+
         assertNotNull(ConfigParser.conciseError(IllegalArgumentException("  spaced \n error  ")))
         assertEquals("spaced error", ConfigParser.conciseError(IllegalArgumentException("  spaced \n error  ")))
     }

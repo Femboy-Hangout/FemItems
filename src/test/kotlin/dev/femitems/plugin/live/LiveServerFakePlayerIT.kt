@@ -69,8 +69,8 @@ class LiveServerFakePlayerIT {
                 "[$platform] Expected startup banner for $pluginVersion on $expectedPlatformLabel",
             )
             assertTrue(
-                startupLog.contains("Loaded 5 mob rules and 0 recipes."),
-                "[$platform] Expected default 5 mob rules and 0 recipes on startup",
+                startupLog.contains("Loaded 5 mob rules and 8 recipes."),
+                "[$platform] Expected default 5 mob rules and 8 recipes on startup",
             )
 
             // 2. Connect two real fake players: FakeOp (operator) and FakeGuest (non-operator)
@@ -78,6 +78,14 @@ class LiveServerFakePlayerIT {
                 FakePlayerClient(username = "FakeGuest", port = server.port).use { guestPlayer ->
                     opPlayer.connectAndAwaitSpawn()
                     guestPlayer.connectAndAwaitSpawn()
+
+                    // Verify default recipes were automatically unlocked in joining player's recipe book
+                    val logBeforeJoinUnlockCheck = server.readLog().length
+                    server.sendConsoleCommand("recipe take FakeGuest femitems:soulpiercer_bow")
+                    server.awaitLog(
+                        Regex("""Took 1 recipe\(s\) from FakeGuest"""),
+                        fromOffset = logBeforeJoinUnlockCheck,
+                    )
 
                     val logBeforeOp = server.readLog().length
                     server.sendConsoleCommand("op FakeOp")
@@ -88,7 +96,7 @@ class LiveServerFakePlayerIT {
                     guestPlayer.sendCommand("femitems reload")
                     guestPlayer.assertNoChatContaining("[FemItems] Config reloaded.", sinceIndex = guestChatMark)
 
-                    // 4. Write deterministic config with guaranteed mob drops + shaped & shapeless recipes
+                    // 4. Write deterministic config with colorized mob drops + shaped/shapeless/book recipes & metadata
                     Files.writeString(
                         server.pluginConfigFile(),
                         """
@@ -97,7 +105,7 @@ class LiveServerFakePlayerIT {
                             entity: ANY
                             name-contains: "Champion"
                             drops:
-                              - { material: ECHO_SHARD, min: 1, max: 1, chance: 1.0, name: "Champion's Trophy" }
+                              - { material: ECHO_SHARD, min: 1, max: 1, chance: 1.0, name: "&6Champion's Trophy" }
                               - { material: GOLD_INGOT, min: 2, max: 2, chance: 1.0 }
                         recipes:
                           arena_blade:
@@ -112,34 +120,56 @@ class LiveServerFakePlayerIT {
                             result:
                               material: IRON_SWORD
                               amount: 1
-                              name: "Arena Blade"
+                              name: "&6Arena Blade"
+                              lore:
+                                - "&7Forged in the arena."
+                              unbreakable: true
+                              enchants:
+                                sharpness: 10
+                                minecraft:unbreaking: 5
                           gem_mix:
                             type: shapeless
                             ingredients: [DIAMOND, EMERALD]
                             result:
                               material: ECHO_SHARD
                               amount: 1
+                          power_book:
+                            type: shapeless
+                            ingredients: [BOOK, ECHO_SHARD]
+                            result:
+                              material: ENCHANTED_BOOK
+                              amount: 1
+                              name: "&5Tome of Power"
+                              enchants:
+                                power: 5
                         """.trimIndent() + "\n",
                         StandardCharsets.UTF_8,
                     )
 
-                    // 5. Player-initiated /femitems reload (tests player region thread -> GlobalRegionScheduler on Folia!)
+                    // 5. Player-initiated /femitems reload (tests player region thread -> GlobalRegionScheduler -> entity.scheduler on Folia!)
                     val opChatBeforeReload = opPlayer.chatCount()
                     val logBeforeReload = server.readLog().length
                     opPlayer.sendCommand("femitems reload")
                     opPlayer.awaitChatContaining("[FemItems] Config reloaded.", sinceIndex = opChatBeforeReload)
-                    server.awaitLog(Regex("""Loaded 1 mob rules and 2 recipes\."""), fromOffset = logBeforeReload)
+                    server.awaitLog(Regex("""Loaded 1 mob rules and 3 recipes\."""), fromOffset = logBeforeReload)
 
-                    // 6. Verify custom shaped & shapeless recipes exist in live Minecraft RecipeManager
-                    val logBeforeRecipes = server.readLog().length
-                    server.sendConsoleCommand("recipe give FakeOp femitems:arena_blade")
-                    server.awaitLog(Regex("""Unlocked 1 recipe\(s\) for FakeOp"""), fromOffset = logBeforeRecipes)
+                    // Allow 1-tick entity.scheduler recipe discovery task to complete for online players
+                    Thread.sleep(500)
+
+                    // 6. Verify reloaded recipes exist in RecipeManager AND were auto-unlocked for online FakeOp
+                    val logBeforeShaped = server.readLog().length
+                    server.sendConsoleCommand("recipe take FakeOp femitems:arena_blade")
+                    server.awaitLog(Regex("""Took 1 recipe\(s\) from FakeOp"""), fromOffset = logBeforeShaped)
 
                     val logBeforeShapeless = server.readLog().length
-                    server.sendConsoleCommand("recipe give FakeOp femitems:gem_mix")
-                    server.awaitLog(Regex("""Unlocked 1 recipe\(s\) for FakeOp"""), fromOffset = logBeforeShapeless)
+                    server.sendConsoleCommand("recipe take FakeOp femitems:gem_mix")
+                    server.awaitLog(Regex("""Took 1 recipe\(s\) from FakeOp"""), fromOffset = logBeforeShapeless)
 
-                    // 7. Player-initiated /femitems debug + live custom-named mob kill + custom drop verification
+                    val logBeforeBook = server.readLog().length
+                    server.sendConsoleCommand("recipe take FakeOp femitems:power_book")
+                    server.awaitLog(Regex("""Took 1 recipe\(s\) from FakeOp"""), fromOffset = logBeforeBook)
+
+                    // 7. Player-initiated /femitems debug + live custom-named mob kill + colorized custom drop verification
                     val opChatBeforeDebug = opPlayer.chatCount()
                     opPlayer.sendCommand("femitems debug")
                     opPlayer.awaitChatContaining("[FemItems] Mob death debug enabled", sinceIndex = opChatBeforeDebug)
@@ -165,12 +195,13 @@ class LiveServerFakePlayerIT {
                         fromOffset = logBeforeMobKill,
                     )
 
-                    // Verify FakeOp actually receives the custom-named Champion's Trophy and 2x gold drop via Minecraft protocol
+                    // Verify FakeOp actually receives the colorized Champion's Trophy and 2x gold drop via Minecraft protocol
                     opPlayer.awaitItemMatching(
-                        description = "Champion's Trophy custom-named item",
+                        description = "Champion's Trophy colorized custom-named item",
                         sinceIndex = itemCountBeforeKill,
                     ) { item ->
-                        item.dataComponentsPatch?.toString()?.contains("Champion's Trophy") == true
+                        val components = item.dataComponentsPatch?.toString().orEmpty()
+                        components.contains("Champion's Trophy") && !components.contains("&6")
                     }
                     opPlayer.awaitItemMatching(
                         description = "2x gold ingot drop stack",
@@ -201,7 +232,7 @@ class LiveServerFakePlayerIT {
                     opPlayer.sendCommand("femitems debug")
                     opPlayer.awaitChatContaining("[FemItems] Mob death debug disabled.", sinceIndex = opChatBeforeDebugOff)
 
-                    // 8. Verify invalid config reload reports error line cleanly without crashing
+                    // 8. Verify invalid material & invalid enchantment config reloads report error lines cleanly without crashing
                     Files.writeString(
                         server.pluginConfigFile(),
                         """
@@ -216,6 +247,24 @@ class LiveServerFakePlayerIT {
                     val opChatBeforeBadReload = opPlayer.chatCount()
                     opPlayer.sendCommand("femitems reload")
                     opPlayer.awaitChatContaining("[FemItems] Config error at line 5.", sinceIndex = opChatBeforeBadReload)
+
+                    Files.writeString(
+                        server.pluginConfigFile(),
+                        """
+                        recipes:
+                          bad_enchant:
+                            type: shapeless
+                            ingredients: [DIAMOND]
+                            result:
+                              material: DIAMOND_SWORD
+                              enchants:
+                                definitely_not_an_enchant: 1
+                        """.trimIndent() + "\n",
+                        StandardCharsets.UTF_8,
+                    )
+                    val opChatBeforeBadEnchant = opPlayer.chatCount()
+                    opPlayer.sendCommand("femitems reload")
+                    opPlayer.awaitChatContaining("[FemItems] Config error at line 8.", sinceIndex = opChatBeforeBadEnchant)
                 }
             }
 

@@ -201,7 +201,7 @@ settings:
 
     $requiredPatterns = @(
         "Initializing FemItems $([regex]::Escape($PluginVersion)) on $expectedPlatformLabel\.",
-        "Loaded 5 mob rules and 0 recipes\.",
+        "Loaded 5 mob rules and 8 recipes\.",
         "\[FemItems\] Config reloaded\.",
         "\[FemItems\] Mob death debug enabled",
         "\[FemItems\] Mob death debug disabled\."

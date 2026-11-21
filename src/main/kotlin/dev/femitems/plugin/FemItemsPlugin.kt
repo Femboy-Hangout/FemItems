@@ -6,8 +6,12 @@ import io.papermc.paper.ServerBuildInfo
 import io.papermc.paper.command.brigadier.CommandSourceStack
 import io.papermc.paper.command.brigadier.Commands
 import io.papermc.paper.plugin.lifecycle.event.types.LifecycleEvents
+import io.papermc.paper.registry.RegistryAccess
+import io.papermc.paper.registry.RegistryKey
 import net.kyori.adventure.key.Key
 import net.kyori.adventure.text.Component
+import net.kyori.adventure.text.format.TextDecoration
+import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
 import org.bukkit.Bukkit
 import org.bukkit.NamespacedKey
@@ -16,10 +20,12 @@ import org.bukkit.entity.Player
 import org.bukkit.event.EventHandler
 import org.bukkit.event.Listener
 import org.bukkit.event.entity.EntityDeathEvent
+import org.bukkit.event.player.PlayerJoinEvent
 import org.bukkit.inventory.ItemStack
 import org.bukkit.inventory.Recipe
 import org.bukkit.inventory.ShapedRecipe
 import org.bukkit.inventory.ShapelessRecipe
+import org.bukkit.inventory.meta.EnchantmentStorageMeta
 import org.bukkit.plugin.java.JavaPlugin
 import java.io.File
 import java.util.Locale
@@ -28,6 +34,9 @@ import java.util.concurrent.atomic.AtomicBoolean
 class FemItemsPlugin : JavaPlugin(), Listener {
     private val recipeLock = Any()
     private val recipeKeys: MutableSet<NamespacedKey> = HashSet()
+
+    @Volatile
+    private var registeredRecipeKeys: Set<NamespacedKey> = emptySet()
 
     @Volatile
     private var mobRules: List<MobRule> = emptyList()
@@ -110,12 +119,14 @@ class FemItemsPlugin : JavaPlugin(), Listener {
 
             if (scheduleOnGlobalRegion) {
                 server.globalRegionScheduler.execute(this) {
-                    val registeredCount = replaceRegisteredRecipes(parsed.recipes)
-                    logger.info("Loaded $ruleCount mob rules and $registeredCount recipes.")
+                    val registeredKeys = replaceRegisteredRecipes(parsed.recipes)
+                    discoverRecipesForOnlinePlayers(registeredKeys)
+                    logger.info("Loaded $ruleCount mob rules and ${registeredKeys.size} recipes.")
                 }
             } else {
-                val registeredCount = replaceRegisteredRecipes(parsed.recipes)
-                logger.info("Loaded $ruleCount mob rules and $registeredCount recipes.")
+                val registeredKeys = replaceRegisteredRecipes(parsed.recipes)
+                discoverRecipesForOnlinePlayers(registeredKeys)
+                logger.info("Loaded $ruleCount mob rules and ${registeredKeys.size} recipes.")
             }
             null
         } catch (exception: Exception) {
@@ -149,44 +160,95 @@ class FemItemsPlugin : JavaPlugin(), Listener {
         }
     }
 
-    private fun createItemStack(definition: ItemDefinition): ItemStack =
-        createItemStack(definition.material, definition.amount, definition.name)
-
-    private fun createItemStack(material: org.bukkit.Material, amount: Int, name: String?): ItemStack {
-        val item = ItemStack(material, amount)
-        if (name != null) {
+    private fun createItemStack(definition: ItemDefinition): ItemStack {
+        val item = ItemStack(definition.material, definition.amount)
+        val hasMetaChanges = definition.name != null ||
+            definition.lore.isNotEmpty() ||
+            definition.unbreakable ||
+            definition.enchants.isNotEmpty()
+        if (hasMetaChanges) {
+            val enchantmentRegistry = if (definition.enchants.isNotEmpty()) {
+                RegistryAccess.registryAccess().getRegistry(RegistryKey.ENCHANTMENT)
+            } else {
+                null
+            }
             item.editMeta { meta ->
-                meta.displayName(Component.text(name))
+                if (definition.name != null) {
+                    meta.displayName(parseLegacyComponent(definition.name))
+                }
+                if (definition.lore.isNotEmpty()) {
+                    meta.lore(definition.lore.map(::parseLegacyComponent))
+                }
+                if (definition.unbreakable) {
+                    meta.isUnbreakable = true
+                }
+                if (enchantmentRegistry != null) {
+                    for ((enchantKey, level) in definition.enchants) {
+                        val enchantment = enchantmentRegistry.get(enchantKey)
+                            ?: throw IllegalArgumentException("Unknown enchantment: $enchantKey")
+                        if (meta is EnchantmentStorageMeta) {
+                            meta.addStoredEnchant(enchantment, level, true)
+                        } else {
+                            meta.addEnchant(enchantment, level, true)
+                        }
+                    }
+                }
             }
         }
         return item
     }
 
-    private fun replaceRegisteredRecipes(definitions: List<RecipeDefinition>): Int = synchronized(recipeLock) {
-        for (key in recipeKeys) {
-            Bukkit.removeRecipe(key)
-        }
-        recipeKeys.clear()
-        for (definition in definitions) {
-            val recipe = toBukkitRecipe(definition)
-            if (Bukkit.addRecipe(recipe)) {
-                recipeKeys.add(keyOf(recipe))
+    private fun parseLegacyComponent(text: String): Component =
+        LegacyComponentSerializer.legacyAmpersand()
+            .deserialize(text)
+            .decorationIfAbsent(TextDecoration.ITALIC, TextDecoration.State.FALSE)
+
+    private fun replaceRegisteredRecipes(definitions: List<RecipeDefinition>): Set<NamespacedKey> =
+        synchronized(recipeLock) {
+            for (key in recipeKeys) {
+                Bukkit.removeRecipe(key)
             }
+            recipeKeys.clear()
+            for (definition in definitions) {
+                val recipe = toBukkitRecipe(definition)
+                if (Bukkit.addRecipe(recipe)) {
+                    recipeKeys.add(keyOf(recipe))
+                }
+            }
+            val snapshot = recipeKeys.toSet()
+            registeredRecipeKeys = snapshot
+            snapshot
         }
-        recipeKeys.size
-    }
 
     private fun removeRegisteredRecipes() = synchronized(recipeLock) {
         for (key in recipeKeys) {
             Bukkit.removeRecipe(key)
         }
         recipeKeys.clear()
+        registeredRecipeKeys = emptySet()
+    }
+
+    private fun discoverRecipesForOnlinePlayers(keys: Set<NamespacedKey>) {
+        if (keys.isEmpty()) return
+        for (player in server.onlinePlayers) {
+            player.scheduler.run(this, { _ ->
+                player.discoverRecipes(keys)
+            }, null)
+        }
     }
 
     private fun keyOf(recipe: Recipe): NamespacedKey = when (recipe) {
         is ShapedRecipe -> recipe.key
         is ShapelessRecipe -> recipe.key
         else -> throw IllegalArgumentException("Unsupported recipe implementation: ${recipe.javaClass.name}")
+    }
+
+    @EventHandler
+    fun onPlayerJoin(event: PlayerJoinEvent) {
+        val keys = registeredRecipeKeys
+        if (keys.isNotEmpty()) {
+            event.player.discoverRecipes(keys)
+        }
     }
 
     @EventHandler
@@ -204,7 +266,9 @@ class FemItemsPlugin : JavaPlugin(), Listener {
 
         val drops = ConfigParser.rollDrops(rules, entity.type, customNamePlain)
         for (drop in drops) {
-            event.drops.add(createItemStack(drop.material, drop.amount, drop.name))
+            event.drops.add(
+                createItemStack(ItemDefinition(material = drop.material, amount = drop.amount, name = drop.name)),
+            )
         }
     }
 

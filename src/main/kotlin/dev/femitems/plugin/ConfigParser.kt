@@ -1,6 +1,9 @@
 package dev.femitems.plugin
 
+import io.papermc.paper.registry.RegistryAccess
+import io.papermc.paper.registry.RegistryKey
 import org.bukkit.Material
+import org.bukkit.NamespacedKey
 import org.bukkit.configuration.ConfigurationSection
 import org.bukkit.configuration.file.YamlConfiguration
 import org.bukkit.entity.EntityType
@@ -16,15 +19,18 @@ object ConfigParser {
     private val LINE_NUMBER_PATTERN: Pattern = Pattern.compile("(?i)\\bline\\s*:?\\s*(\\d+)")
     private val MATERIAL_ERROR_PATTERN: Pattern =
         Pattern.compile("Unknown (?:drop material|ingredient).*?:\\s*([A-Za-z0-9_:-]+)")
+    private val ENCHANT_ERROR_PATTERN: Pattern =
+        Pattern.compile("recipes\\.([A-Za-z0-9_-]+)\\.result\\.enchants\\.([^\\s]+)")
     private val PATH_ERROR_PATTERN: Pattern =
         Pattern.compile("(?:mobs|recipes)\\.([A-Za-z0-9_-]+)(?:\\.([A-Za-z0-9_-]+))?")
 
     fun parse(
         config: YamlConfiguration,
         maxStackSizeProvider: (Material) -> Int = { it.maxStackSize },
+        enchantmentValidator: (NamespacedKey) -> Boolean = ::defaultEnchantmentExists,
     ): ParsedConfig {
         val mobRules = readMobRules(config)
-        val recipes = readRecipes(config, maxStackSizeProvider)
+        val recipes = readRecipes(config, maxStackSizeProvider, enchantmentValidator)
         return ParsedConfig(mobRules = mobRules, recipes = recipes)
     }
 
@@ -80,6 +86,7 @@ object ConfigParser {
     fun readRecipes(
         config: YamlConfiguration,
         maxStackSizeProvider: (Material) -> Int = { it.maxStackSize },
+        enchantmentValidator: (NamespacedKey) -> Boolean = ::defaultEnchantmentExists,
     ): List<RecipeDefinition> {
         val section = config.getConfigurationSection("recipes") ?: return emptyList()
         val recipes = ArrayList<RecipeDefinition>()
@@ -90,6 +97,7 @@ object ConfigParser {
                 section = recipeSection.getConfigurationSection("result"),
                 path = "recipes.$id.result",
                 maxStackSizeProvider = maxStackSizeProvider,
+                enchantmentValidator = enchantmentValidator,
             )
             val type = recipeSection.getString("type", "shaped").orEmpty().lowercase(Locale.ROOT)
 
@@ -136,8 +144,8 @@ object ConfigParser {
 
                 "shapeless" -> {
                     val rawIngredients = recipeSection.getStringList("ingredients")
-                    if (rawIngredients.isEmpty()) {
-                        throw IllegalArgumentException("recipes.$id.ingredients must contain at least one material")
+                    if (rawIngredients.isEmpty() || rawIngredients.size > 9) {
+                        throw IllegalArgumentException("recipes.$id.ingredients must contain between 1 and 9 materials")
                     }
                     val ingredients = rawIngredients.map { materialName ->
                         val material = Material.matchMaterial(materialName)
@@ -166,6 +174,7 @@ object ConfigParser {
         section: ConfigurationSection?,
         path: String,
         maxStackSizeProvider: (Material) -> Int = { it.maxStackSize },
+        enchantmentValidator: (NamespacedKey) -> Boolean = ::defaultEnchantmentExists,
     ): ItemDefinition {
         if (section == null) {
             throw IllegalArgumentException("$path is required")
@@ -177,8 +186,44 @@ object ConfigParser {
             throw IllegalArgumentException("$path has an invalid material or amount")
         }
         val name = section.getString("name")
-        return ItemDefinition(material = material, amount = amount, name = name)
+        val lore = section.getStringList("lore")
+        val unbreakable = section.getBoolean("unbreakable", false)
+        val enchants = LinkedHashMap<NamespacedKey, Int>()
+        val enchantments = section.getConfigurationSection("enchants")
+        if (enchantments != null) {
+            for (enchantName in enchantments.getKeys(false)) {
+                val level = enchantments.getInt(enchantName, 0)
+                if (level < 1) {
+                    throw IllegalArgumentException("Enchant level must be at least 1 at $path.enchants.$enchantName")
+                }
+                val normalizedKey = enchantName.lowercase(Locale.ROOT)
+                val enchantKey = if (normalizedKey.contains(":")) {
+                    NamespacedKey.fromString(normalizedKey)
+                } else {
+                    try {
+                        NamespacedKey.minecraft(normalizedKey)
+                    } catch (_: IllegalArgumentException) {
+                        null
+                    }
+                } ?: throw IllegalArgumentException("Invalid enchantment key at $path.enchants.$enchantName")
+                if (!enchantmentValidator(enchantKey)) {
+                    throw IllegalArgumentException("Unknown enchantment at $path.enchants.$enchantName")
+                }
+                enchants[enchantKey] = level
+            }
+        }
+        return ItemDefinition(
+            material = material,
+            amount = amount,
+            name = name,
+            lore = lore.toList(),
+            unbreakable = unbreakable,
+            enchants = enchants.toMap(),
+        )
     }
+
+    private fun defaultEnchantmentExists(key: NamespacedKey): Boolean =
+        RegistryAccess.registryAccess().getRegistry(RegistryKey.ENCHANTMENT).get(key) != null
 
     private fun isAirMaterial(material: Material): Boolean =
         material == Material.AIR || material == Material.CAVE_AIR || material == Material.VOID_AIR
@@ -254,6 +299,35 @@ object ConfigParser {
             val needle = "material: ${materialMatcher.group(1)}"
             for (i in lines.indices) {
                 if (lines[i].contains(needle)) return i + 1
+            }
+        }
+
+        val enchantMatcher = ENCHANT_ERROR_PATTERN.matcher(message)
+        if (enchantMatcher.find()) {
+            val recipeId = enchantMatcher.group(1)
+            val enchantKey = enchantMatcher.group(2)
+            val recipeLine = Pattern.compile("^\\s*${Pattern.quote(recipeId)}:\\s*(?:#.*)?$")
+            for (i in lines.indices) {
+                if (recipeLine.matcher(lines[i]).matches()) {
+                    val recipeIndent = leadingSpaces(lines[i])
+                    for (j in (i + 1) until lines.size) {
+                        if (lines[j].isNotBlank() && leadingSpaces(lines[j]) <= recipeIndent) break
+                        if (lines[j].trim().startsWith("enchants:")) {
+                            val enchantsIndent = leadingSpaces(lines[j])
+                            for (k in (j + 1) until lines.size) {
+                                if (lines[k].isNotBlank() && leadingSpaces(lines[k]) <= enchantsIndent) break
+                                val trimmed = lines[k].trim()
+                                if (trimmed.startsWith("$enchantKey:") ||
+                                    trimmed.startsWith("\"$enchantKey\":") ||
+                                    trimmed.startsWith("'$enchantKey':")
+                                ) {
+                                    return k + 1
+                                }
+                            }
+                            return j + 1
+                        }
+                    }
+                }
             }
         }
 

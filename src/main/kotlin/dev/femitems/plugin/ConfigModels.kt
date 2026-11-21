@@ -1,6 +1,7 @@
 package dev.femitems.plugin
 
 import org.bukkit.Material
+import org.bukkit.NamespacedKey
 import org.bukkit.entity.EntityType
 
 data class DropRule(
@@ -22,6 +23,9 @@ data class ItemDefinition(
     val material: Material,
     val amount: Int,
     val name: String? = null,
+    val lore: List<String> = emptyList(),
+    val unbreakable: Boolean = false,
+    val enchants: Map<NamespacedKey, Int> = emptyMap(),
 )
 
 sealed interface RecipeDefinition {

@@ -255,7 +255,7 @@ with open(log_path, "r", encoding="utf-8", errors="replace") as f:
 
 required = [
     rf"Initializing FemItems {re.escape(version)} on {label}\.",
-    r"Loaded 5 mob rules and 0 recipes\.",
+    r"Loaded 5 mob rules and 8 recipes\.",
     r"\[FemItems\] Config reloaded\.",
     r"\[FemItems\] Mob death debug enabled",
     r"\[FemItems\] Mob death debug disabled\.",
