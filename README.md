@@ -63,7 +63,3 @@ For a shapeless recipe, use `type: shapeless` and make `ingredients` a list of m
 ```
 
 Recipe IDs should be unique and use lowercase letters, digits, underscores, or hyphens. Ingredients and results currently use vanilla Bukkit materials; custom plugin items are not implemented.
-
-## Source datapack issues and limits
-
-`forsaken_loot.zip` contains loose custom loot tables at `data/forsaken/loot_table/*.json`; nothing references them as entity loot tables. As a result, vanilla entities would not use them automatically. `dreadbound.jason` is also misspelled and is ignored as a JSON loot table. The pack includes loot rules only, not crafting recipes. The plugin reproduces item types, counts, chances, and the trophy display name. Vanilla random enchantment behavior from the original champion/dreadbound tables is not reproduced in this first version.
