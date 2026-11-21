@@ -26,19 +26,30 @@ The archive contains no crafting recipes, so `recipes` starts empty. Add recipes
 
 ```yaml
 recipes:
-  example:
+  iron_sword:
     type: shaped
     shape:
-      - "AA"
-      - " B"
+      - " I "
+      - " I "
+      - " S "
     ingredients:
-      A: IRON_INGOT
-      B: STICK
+      I: IRON_INGOT
+      S: STICK
     result:
       material: IRON_SWORD
       amount: 1
       name: "Arena Blade"
 ```
+
+Each string in `shape` is one crafting-grid row, read left to right. Every character is one slot. Here, `I` is an iron ingot, `S` is a stick, and a space means the slot is empty:
+
+```text
+ I
+ I
+ S
+```
+
+The `ingredients` section tells the plugin which material each letter represents. The `result` section tells it what item to craft. For a normal iron sword, the three rows are ingot, ingot, stick; the centered spaces make that pattern line up like a sword in the 3×3 crafting grid.
 
 For a shapeless recipe, use `type: shapeless` and make `ingredients` a list of material names:
 
