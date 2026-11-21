@@ -1,0 +1,107 @@
+name: Build, Test, and Release
+
+on:
+  push:
+    branches:
+      - '**'
+    tags:
+      - 'v*'
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Temurin Java 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+
+      - name: Read plugin metadata
+        id: meta
+        run: |
+          VERSION="$(python3 -c '
+          import xml.etree.ElementTree as ET
+          root = ET.parse("pom.xml").getroot()
+          ns = {"m": "http://maven.apache.org/POM/4.0.0"}
+          ver = root.find("m:version", ns)
+          if ver is None:
+              ver = root.find("version")
+          print(ver.text.strip())
+          ')"
+          SHORT_SHA="${GITHUB_SHA::7}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "short_sha=${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+          echo "jar_path=target/femitems-${VERSION}.jar" >> "$GITHUB_OUTPUT"
+
+      - name: Build and run JUnit 5 unit tests
+        run: |
+          chmod +x mvnw scripts/smoke-test.sh scripts/run-server.sh
+          ./mvnw -B clean verify
+
+      - name: Verify shaded JAR exists
+        run: |
+          test -f "${{ steps.meta.outputs.jar_path }}"
+          ls -lh "${{ steps.meta.outputs.jar_path }}"
+
+      - name: Upload plugin JAR artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FemItems-${{ steps.meta.outputs.version }}-${{ steps.meta.outputs.short_sha }}
+          path: ${{ steps.meta.outputs.jar_path }}
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Cache Paper and Folia server JARs
+        uses: actions/cache@v4
+        with:
+          path: .mc-test/cache
+          key: mc-server-cache-26.3-${{ github.run_id }}
+          restore-keys: |
+            mc-server-cache-26.3-
+
+      - name: Run live Paper 26.3 and Folia 26.3 fake-player integration tests
+        run: ./mvnw -B failsafe:integration-test failsafe:verify -P live-test
+
+      - name: Upload live test logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-test-logs-${{ steps.meta.outputs.short_sha }}
+          path: |
+            .mc-test/live-*/logs/latest.log
+            .mc-test/live-*/live-stdout.log
+            .mc-test/live-*/live-stderr.log
+            target/failsafe-reports/
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Publish GitHub Release on new version
+        if: >-
+          github.event_name == 'push' &&
+          (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.meta.outputs.version }}
+          JAR_PATH: ${{ steps.meta.outputs.jar_path }}
+        run: |
+          TAG="v${VERSION}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release ${TAG} already exists; skipping release creation."
+            exit 0
+          fi
+          gh release create "$TAG" "$JAR_PATH" \
+            --target "$GITHUB_SHA" \
+            --title "FemItems ${VERSION}" \
+            --generate-notes

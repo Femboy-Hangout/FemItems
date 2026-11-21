@@ -1,6 +1,0 @@
-name: FemItems
-version: '1.0.0'
-main: dev.femitems.plugin.FemItemsPlugin
-api-version: '26.3'
-authors: [FemItems]
-description: Reloadable custom mob drops and crafting recipes.
