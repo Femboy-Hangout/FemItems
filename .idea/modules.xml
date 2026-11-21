@@ -3,6 +3,7 @@
   <component name="ProjectModuleManager">
     <modules>
       <module fileurl="file://$PROJECT_DIR$/femitems.iml" filepath="$PROJECT_DIR$/femitems.iml" />
+      <module fileurl="file://$PROJECT_DIR$/forsaken-loot.iml" filepath="$PROJECT_DIR$/forsaken-loot.iml" />
     </modules>
   </component>
 </project>
