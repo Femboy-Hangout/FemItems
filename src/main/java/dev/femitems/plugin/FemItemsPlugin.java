@@ -209,8 +209,8 @@ public final class FemItemsPlugin extends JavaPlugin implements Listener {
         ItemStack item = new ItemStack(material, amount);
         String name = section.getString("name");
         ItemMeta meta = item.getItemMeta();
-        if (name != null) meta.setDisplayName(name);
-        List<String> lore = section.getStringList("lore");
+        if (name != null) meta.setDisplayName(colorize(name));
+        List<String> lore = section.getStringList("lore").stream().map(this::colorize).toList();
         if (!lore.isEmpty()) meta.setLore(lore);
         if (section.getBoolean("unbreakable", false)) meta.setUnbreakable(true);
 
@@ -237,6 +237,10 @@ public final class FemItemsPlugin extends JavaPlugin implements Listener {
         }
         item.setItemMeta(meta);
         return item;
+    }
+
+    private String colorize(String text) {
+        return ChatColor.translateAlternateColorCodes('&', text);
     }
 
     private void removeRegisteredRecipes() {
@@ -271,7 +275,7 @@ public final class FemItemsPlugin extends JavaPlugin implements Listener {
                 ItemStack item = new ItemStack(drop.material, amount);
                 if (drop.name != null) {
                     var meta = item.getItemMeta();
-                    meta.setDisplayName(drop.name);
+                    meta.setDisplayName(colorize(drop.name));
                     item.setItemMeta(meta);
                 }
                 entity.getWorld().dropItemNaturally(entity.getLocation(), item);
