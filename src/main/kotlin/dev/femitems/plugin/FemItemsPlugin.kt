@@ -351,12 +351,12 @@ class FemItemsPlugin : JavaPlugin(), Listener {
 
         if (debugMobDeaths.get() && entity !is Player) {
             val matches = rules
-                .filter { rule -> ConfigParser.matchesRule(rule, entity.type, customNamePlain) }
+                .filter { rule -> ConfigParser.matchesRule(rule, entity.type, customNamePlain, entity.scoreboardTags) }
                 .map(MobRule::id)
             logger.info("Mob death debug: entity=${entity.type}, customName=$customNamePlain, matchingRules=$matches")
         }
 
-        val drops = ConfigParser.rollDrops(rules, entity.type, customNamePlain)
+        val drops = ConfigParser.rollDrops(rules, entity.type, customNamePlain, scoreboardTags = entity.scoreboardTags)
         for (drop in drops) {
             val template = if (drop.randomEnchantment) {
                 createRandomEnchantedBook(drop.name)

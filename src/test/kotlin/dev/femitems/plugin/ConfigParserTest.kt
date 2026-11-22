@@ -242,7 +242,7 @@ class ConfigParserTest {
     }
 
     @Test
-    fun `entity ANY requires non-empty name-contains filter`() {
+    fun `entity ANY requires an entity tag`() {
         val yaml = YamlConfiguration().apply {
             loadFromString(
                 """
@@ -259,7 +259,7 @@ class ConfigParserTest {
         val ex = assertThrows<IllegalArgumentException> {
             ConfigParser.parse(yaml, testMaxStackSize, testEnchantmentValidator)
         }
-        assertTrue(ex.message.orEmpty().contains("requires a non-empty name-contains filter"))
+        assertTrue(ex.message.orEmpty().contains("entity-tag is required"))
     }
 
     @Test
@@ -270,6 +270,7 @@ class ConfigParserTest {
                 mobs:
                   bad:
                     entity: ZOMBIE
+                    entity-tag: test.bad
                     drops:
                       - { material: COAL, min: 1, max: 2, chance: 1.5 }
                 """.trimIndent(),
@@ -337,6 +338,7 @@ class ConfigParserTest {
                 id = "boss",
                 type = null,
                 nameContains = "Champion",
+                entityTag = "forsaken.champion",
                 drops = listOf(
                     DropRule(Material.GOLD_INGOT, min = 3, max = 5, chance = 1.0, name = "&6Arena Gold"),
                     DropRule(Material.DIAMOND, min = 1, max = 1, chance = 0.0),
@@ -346,6 +348,7 @@ class ConfigParserTest {
                 id = "skeleton_only",
                 type = EntityType.SKELETON,
                 nameContains = "",
+                entityTag = "test.skeleton",
                 drops = listOf(DropRule(Material.ARROW, min = 2, max = 2, chance = 1.0)),
             ),
         )
@@ -355,6 +358,7 @@ class ConfigParserTest {
             entityType = EntityType.ZOMBIE,
             customNamePlain = "§eFallen Champion",
             random = Random(42),
+            scoreboardTags = setOf("forsaken.champion"),
         )
 
         assertEquals(1, drops.size)
@@ -372,6 +376,7 @@ class ConfigParserTest {
                 mobs:
                   dreadbound:
                     entity: ANY
+                    entity-tag: forsaken.dreadbound
                     name-contains: Dreadbound
                     drops:
                       - { material: ENCHANTED_BOOK, min: 1, max: 1, chance: 1.0, random-enchantment: true }
@@ -381,9 +386,32 @@ class ConfigParserTest {
 
         val rule = ConfigParser.readMobRules(yaml).single()
         assertTrue(rule.drops.single().randomEnchantment)
-        val rolled = ConfigParser.rollDrops(listOf(rule), EntityType.HUSK, "The Dreadbound", Random(4)).single()
+        val rolled = ConfigParser.rollDrops(
+            listOf(rule), EntityType.HUSK, "The Dreadbound", Random(4), setOf("forsaken.dreadbound"),
+        ).single()
         assertEquals(Material.ENCHANTED_BOOK, rolled.material)
         assertTrue(rolled.randomEnchantment)
+    }
+
+    @Test
+    fun `custom mob tag prevents renamed ordinary mobs from matching`() {
+        val yaml = YamlConfiguration().apply {
+            loadFromString(
+                """
+                mobs:
+                  champion:
+                    entity: ANY
+                    entity-tag: forsaken.champion
+                    name-contains: Champion
+                    drops:
+                      - { material: DIAMOND, chance: 1.0 }
+                """.trimIndent(),
+            )
+        }
+        val rule = ConfigParser.readMobRules(yaml).single()
+        assertTrue(ConfigParser.matchesRule(rule, EntityType.WITHER_SKELETON, "The Forsaken Champion", setOf("forsaken.champion")))
+        assertFalse(ConfigParser.matchesRule(rule, EntityType.WITHER_SKELETON, "The Forsaken Champion", emptySet()))
+        assertFalse(ConfigParser.matchesRule(rule, EntityType.WOLF, "Champion", emptySet()))
     }
 
     @Test
@@ -394,6 +422,7 @@ class ConfigParserTest {
                 mobs:
                   dreadbound:
                     entity: ANY
+                    entity-tag: forsaken.dreadbound
                     name-contains: Dreadbound
                     drops:
                       - { material: BOOK, random-enchantment: true }
@@ -478,6 +507,7 @@ class ConfigParserTest {
                 mobs:
                   quoted:
                     entity: ZOMBIE
+                    entity-tag: test.quoted
                     drops:
                       - { material: COAL, min: "2", max: "4", chance: "0.05" }
                 """.trimIndent(),
@@ -494,6 +524,7 @@ class ConfigParserTest {
                 mobs:
                   garbage:
                     entity: ZOMBIE
+                    entity-tag: test.garbage
                     drops:
                       - { material: COAL, min: 1, max: 1, chance: "often" }
                 """.trimIndent(),

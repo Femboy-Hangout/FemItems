@@ -113,6 +113,7 @@ class LiveServerFakePlayerIT {
                         mobs:
                           champion:
                             entity: ANY
+                            entity-tag: femitems.test_champion
                             name-contains: "Champion"
                             drops:
                               - { material: ECHO_SHARD, min: 1, max: 1, chance: 1.0, name: "&6Champion's Trophy" }
@@ -245,7 +246,7 @@ class LiveServerFakePlayerIT {
                     val itemCountBeforeKill = opPlayer.receivedItemCount()
                     val logBeforeMobKill = server.readLog().length
                     opPlayer.sendCommand(
-                        """summon minecraft:zombie ~ ~ ~ {CustomName:"Arena Champion",NoAI:1b,Invulnerable:0b}""",
+                        """summon minecraft:zombie ~ ~ ~ {Tags:["femitems.test_champion"],CustomName:"Arena Champion",NoAI:1b,Invulnerable:0b}""",
                     )
                     Thread.sleep(500)
                     opPlayer.sendCommand("kill @e[type=minecraft:zombie,distance=..10]")
@@ -319,6 +320,7 @@ class LiveServerFakePlayerIT {
                         mobs:
                           broken:
                             entity: ZOMBIE
+                            entity-tag: test.broken
                             drops:
                               - { material: NOT_A_REAL_MATERIAL, min: 1, max: 1, chance: 1.0 }
                         """.trimIndent() + "\n",
@@ -326,7 +328,7 @@ class LiveServerFakePlayerIT {
                     )
                     val opChatBeforeBadReload = opPlayer.chatCount()
                     opPlayer.sendCommand("femitems reload")
-                    opPlayer.awaitChatContaining("[FemItems] Config error at line 5.", sinceIndex = opChatBeforeBadReload)
+                    opPlayer.awaitChatContaining("[FemItems] Config error at line 6.", sinceIndex = opChatBeforeBadReload)
 
                     Files.writeString(
                         server.pluginConfigFile(),

@@ -52,9 +52,8 @@ object ConfigParser {
             }
 
             val nameContains = section.getString("name-contains", "").orEmpty()
-            if (type == null && nameContains.isBlank()) {
-                throw IllegalArgumentException("mobs.$id.entity: ANY requires a non-empty name-contains filter")
-            }
+            val entityTag = section.getString("entity-tag")?.trim()?.takeIf(String::isNotEmpty)
+                ?: throw IllegalArgumentException("mobs.$id.entity-tag is required to identify this custom mob")
 
             val drops = ArrayList<DropRule>()
             for (raw in section.getMapList("drops")) {
@@ -86,7 +85,7 @@ object ConfigParser {
                 drops.add(DropRule(material, min, max, chance, customName, randomEnchantment))
             }
 
-            rules.add(MobRule(id, type, nameContains, drops.toList()))
+            rules.add(MobRule(id, type, nameContains, entityTag, drops.toList()))
         }
 
         return rules.toList()
@@ -242,8 +241,16 @@ object ConfigParser {
     private fun isAirMaterial(material: Material): Boolean =
         material == Material.AIR || material == Material.CAVE_AIR || material == Material.VOID_AIR
 
-    fun matchesRule(rule: MobRule, entityType: EntityType, customNamePlain: String?): Boolean {
+    fun matchesRule(
+        rule: MobRule,
+        entityType: EntityType,
+        customNamePlain: String?,
+        scoreboardTags: Set<String> = emptySet(),
+    ): Boolean {
         if (rule.type != null && entityType != rule.type) {
+            return false
+        }
+        if (rule.entityTag !in scoreboardTags) {
             return false
         }
         return matchesName(customNamePlain, rule.nameContains)
@@ -269,10 +276,11 @@ object ConfigParser {
         entityType: EntityType,
         customNamePlain: String?,
         random: Random = Random.Default,
+        scoreboardTags: Set<String> = emptySet(),
     ): List<RolledDrop> {
         val rolled = ArrayList<RolledDrop>()
         for (rule in rules) {
-            if (!matchesRule(rule, entityType, customNamePlain)) continue
+            if (!matchesRule(rule, entityType, customNamePlain, scoreboardTags)) continue
             for (drop in rule.drops) {
                 if (random.nextDouble() >= drop.chance) continue
                 val amount = random.nextInt(drop.min, drop.max + 1)

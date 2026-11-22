@@ -17,6 +17,7 @@ data class MobRule(
     val id: String,
     val type: EntityType?,
     val nameContains: String,
+    val entityTag: String,
     val drops: List<DropRule>,
 )
 
