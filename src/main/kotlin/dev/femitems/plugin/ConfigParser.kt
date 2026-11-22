@@ -74,7 +74,16 @@ object ConfigParser {
                 } else {
                     null
                 }
-                drops.add(DropRule(material, min, max, chance, customName))
+                val randomEnchantment = when (val value = raw["random-enchantment"]) {
+                    null -> false
+                    is Boolean -> value
+                    else -> value.toString().toBooleanStrictOrNull()
+                        ?: throw IllegalArgumentException("mobs.$id.drops.random-enchantment must be true or false")
+                }
+                if (randomEnchantment && material != Material.ENCHANTED_BOOK) {
+                    throw IllegalArgumentException("mobs.$id.drops.random-enchantment requires material ENCHANTED_BOOK")
+                }
+                drops.add(DropRule(material, min, max, chance, customName, randomEnchantment))
             }
 
             rules.add(MobRule(id, type, nameContains, drops.toList()))
@@ -267,7 +276,14 @@ object ConfigParser {
             for (drop in rule.drops) {
                 if (random.nextDouble() >= drop.chance) continue
                 val amount = random.nextInt(drop.min, drop.max + 1)
-                rolled.add(RolledDrop(material = drop.material, amount = amount, name = drop.name))
+                rolled.add(
+                    RolledDrop(
+                        material = drop.material,
+                        amount = amount,
+                        name = drop.name,
+                        randomEnchantment = drop.randomEnchantment,
+                    ),
+                )
             }
         }
         return rolled

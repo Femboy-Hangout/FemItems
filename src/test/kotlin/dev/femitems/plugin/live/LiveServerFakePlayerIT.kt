@@ -118,6 +118,7 @@ class LiveServerFakePlayerIT {
                               - { material: ECHO_SHARD, min: 1, max: 1, chance: 1.0, name: "&6Champion's Trophy" }
                               - { material: GOLD_INGOT, min: 2, max: 2, chance: 1.0 }
                               - { material: ARROW, min: 70, max: 70, chance: "1.0" }
+                              - { material: ENCHANTED_BOOK, min: 1, max: 1, chance: 1.0, random-enchantment: true }
                         recipes:
                           arena_blade:
                             type: shaped
@@ -268,6 +269,12 @@ class LiveServerFakePlayerIT {
                         sinceIndex = itemCountBeforeKill,
                     ) { item ->
                         item.amount == 2 && item.dataComponentsPatch == null
+                    }
+                    opPlayer.awaitItemMatching(
+                        description = "randomly enchanted book drop",
+                        sinceIndex = itemCountBeforeKill,
+                    ) { item ->
+                        item.dataComponentsPatch?.toString().orEmpty().contains("stored_enchantments")
                     }
 
                     // Double-check on the server side that both materials exist in FakeOp's inventory

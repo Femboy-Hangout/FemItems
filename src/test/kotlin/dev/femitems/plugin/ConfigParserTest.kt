@@ -365,6 +365,46 @@ class ConfigParserTest {
     }
 
     @Test
+    fun `parses and rolls random enchanted book drops`() {
+        val yaml = YamlConfiguration().apply {
+            loadFromString(
+                """
+                mobs:
+                  dreadbound:
+                    entity: ANY
+                    name-contains: Dreadbound
+                    drops:
+                      - { material: ENCHANTED_BOOK, min: 1, max: 1, chance: 1.0, random-enchantment: true }
+                """.trimIndent(),
+            )
+        }
+
+        val rule = ConfigParser.readMobRules(yaml).single()
+        assertTrue(rule.drops.single().randomEnchantment)
+        val rolled = ConfigParser.rollDrops(listOf(rule), EntityType.HUSK, "The Dreadbound", Random(4)).single()
+        assertEquals(Material.ENCHANTED_BOOK, rolled.material)
+        assertTrue(rolled.randomEnchantment)
+    }
+
+    @Test
+    fun `random enchantment requires an enchanted book`() {
+        val yaml = YamlConfiguration().apply {
+            loadFromString(
+                """
+                mobs:
+                  dreadbound:
+                    entity: ANY
+                    name-contains: Dreadbound
+                    drops:
+                      - { material: BOOK, random-enchantment: true }
+                """.trimIndent(),
+            )
+        }
+        val error = assertThrows<IllegalArgumentException> { ConfigParser.readMobRules(yaml) }
+        assertTrue(error.message.orEmpty().contains("requires material ENCHANTED_BOOK"))
+    }
+
+    @Test
     fun `semantic error line detection locates bad material, section fields, and invalid enchants`() {
         val contents = """
             mobs:

@@ -10,6 +10,7 @@ data class DropRule(
     val max: Int,
     val chance: Double,
     val name: String? = null,
+    val randomEnchantment: Boolean = false,
 )
 
 data class MobRule(
@@ -55,4 +56,5 @@ data class RolledDrop(
     val material: Material,
     val amount: Int,
     val name: String? = null,
+    val randomEnchantment: Boolean = false,
 )

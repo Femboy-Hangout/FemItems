@@ -15,6 +15,7 @@ import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
 import org.bukkit.Bukkit
 import org.bukkit.Keyed
+import org.bukkit.Material
 import org.bukkit.NamespacedKey
 import org.bukkit.command.CommandSender
 import org.bukkit.configuration.file.YamlConfiguration
@@ -357,11 +358,31 @@ class FemItemsPlugin : JavaPlugin(), Listener {
 
         val drops = ConfigParser.rollDrops(rules, entity.type, customNamePlain)
         for (drop in drops) {
-            val template = createItemStack(ItemDefinition(material = drop.material, amount = 1, name = drop.name))
+            val template = if (drop.randomEnchantment) {
+                createRandomEnchantedBook(drop.name)
+            } else {
+                createItemStack(ItemDefinition(material = drop.material, amount = 1, name = drop.name))
+            }
             for (stackSize in ConfigParser.splitIntoStacks(drop.amount, template.maxStackSize)) {
                 event.drops.add(template.clone().apply { amount = stackSize })
             }
         }
+    }
+
+    private fun createRandomEnchantedBook(name: String?): ItemStack {
+        val registry = RegistryAccess.registryAccess().getRegistry(RegistryKey.ENCHANTMENT)
+        val enchantments = registry.stream().toList()
+        require(enchantments.isNotEmpty()) { "No enchantments are available for random enchanted book drops" }
+        val enchantment = enchantments.random()
+        val level = (1..enchantment.maxLevel).random()
+        val item = ItemStack(Material.ENCHANTED_BOOK)
+        item.editMeta { meta ->
+            if (meta is EnchantmentStorageMeta) {
+                meta.addStoredEnchant(enchantment, level, true)
+                if (name != null) meta.displayName(parseLegacyComponent(name))
+            }
+        }
+        return item
     }
 
     companion object {
