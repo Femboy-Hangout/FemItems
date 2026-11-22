@@ -5,3 +5,7 @@ api-version: '26.3'
 folia-supported: true
 authors: [FemItems]
 description: Reloadable custom mob drops and crafting recipes for Paper and Folia.
+permissions:
+  femitems.reload:
+    description: Allows /femitems (info), /femitems reload, and /femitems debug.
+    default: op

@@ -51,10 +51,7 @@ class FemItemsPlugin : JavaPlugin(), Listener {
         val platform = if (isFolia()) "Folia" else "Paper"
         logger.info("Initializing FemItems ${pluginMeta.version} on $platform.")
 
-        val error = reloadContent(scheduleOnGlobalRegion = false)
-        if (error != null) {
-            logger.warning(error)
-        }
+        reloadContent(scheduleOnGlobalRegion = false)
     }
 
     override fun onDisable() {
@@ -71,27 +68,31 @@ class FemItemsPlugin : JavaPlugin(), Listener {
     private fun buildRootCommand(label: String): LiteralCommandNode<CommandSourceStack> =
         Commands.literal(label)
             .requires { source -> source.sender.hasPermission("femitems.reload") }
+            .executes { context ->
+                context.source.sender.sendMessage(
+                    Messages.info(
+                        version = pluginMeta.version,
+                        platform = if (isFolia()) "Folia" else "Paper",
+                        mobRules = mobRules.size,
+                        recipes = registeredRecipeKeys.size,
+                        debug = debugMobDeaths.get(),
+                    ),
+                )
+                Command.SINGLE_SUCCESS
+            }
             .then(
                 Commands.literal("reload").executes { context ->
-                    val sender = context.source.sender
-                    val error = reloadContent(scheduleOnGlobalRegion = true)
-                    when (error) {
-                        null -> sender.sendMessage("[FemItems] Config reloaded.")
-                        "?" -> sender.sendMessage("[FemItems] Config error; see console.")
-                        else -> sender.sendMessage("[FemItems] Config error at line $error.")
+                    val message = when (val result = reloadContent(scheduleOnGlobalRegion = true)) {
+                        is ReloadResult.Success -> Messages.reloaded(result.mobRules, result.recipes)
+                        is ReloadResult.Failure -> Messages.configError(result.line, result.detail)
                     }
+                    context.source.sender.sendMessage(message)
                     Command.SINGLE_SUCCESS
                 },
             )
             .then(
                 Commands.literal("debug").executes { context ->
-                    val enabled = toggleDebugMobDeaths()
-                    val message = if (enabled) {
-                        "[FemItems] Mob death debug enabled; check console after killing a mob."
-                    } else {
-                        "[FemItems] Mob death debug disabled."
-                    }
-                    context.source.sender.sendMessage(message)
+                    context.source.sender.sendMessage(Messages.debugToggled(toggleDebugMobDeaths()))
                     Command.SINGLE_SUCCESS
                 },
             )
@@ -107,38 +108,43 @@ class FemItemsPlugin : JavaPlugin(), Listener {
         }
     }
 
-    private fun reloadContent(scheduleOnGlobalRegion: Boolean): String? {
+    private sealed interface ReloadResult {
+        data class Success(val mobRules: Int, val recipes: Int) : ReloadResult
+        data class Failure(val line: Int?, val detail: String) : ReloadResult
+    }
+
+    private fun reloadContent(scheduleOnGlobalRegion: Boolean): ReloadResult {
         val configFile = File(dataFolder, "config.yml")
         return try {
             val newConfig = YamlConfiguration()
             newConfig.load(configFile)
             val parsed = ConfigParser.parse(newConfig)
+            // Build every Bukkit recipe before touching live state, so a bad recipe fails the whole
+            // reload up front instead of leaving the server half-reloaded after reporting success.
+            val recipes = parsed.recipes.map(::toBukkitRecipe)
 
             mobRules = parsed.mobRules
             val ruleCount = parsed.mobRules.size
 
             if (scheduleOnGlobalRegion) {
-                server.globalRegionScheduler.execute(this) {
-                    val registeredKeys = replaceRegisteredRecipes(parsed.recipes)
-                    discoverRecipesForOnlinePlayers(registeredKeys)
-                    logger.info("Loaded $ruleCount mob rules and ${registeredKeys.size} recipes.")
-                }
+                server.globalRegionScheduler.execute(this) { applyRecipes(recipes, ruleCount) }
             } else {
-                val registeredKeys = replaceRegisteredRecipes(parsed.recipes)
-                discoverRecipesForOnlinePlayers(registeredKeys)
-                logger.info("Loaded $ruleCount mob rules and ${registeredKeys.size} recipes.")
+                applyRecipes(recipes, ruleCount)
             }
-            null
+            ReloadResult.Success(ruleCount, recipes.size)
         } catch (exception: Exception) {
-            val line = ConfigParser.findErrorLine(exception, configFile)
-            val error = if (line > 0) {
-                "config.yml line $line"
-            } else {
-                "config.yml (line unavailable): ${ConfigParser.conciseError(exception)}"
-            }
-            logger.warning("[FemItems] $error")
-            if (line > 0) line.toString() else "?"
+            val line = ConfigParser.findErrorLine(exception, configFile).takeIf { it > 0 }
+            val detail = ConfigParser.conciseError(exception)
+            val location = if (line != null) "config.yml line $line" else "config.yml (line unavailable)"
+            logger.warning("$location: $detail")
+            ReloadResult.Failure(line, detail)
         }
+    }
+
+    private fun applyRecipes(recipes: List<Recipe>, ruleCount: Int) {
+        val registeredKeys = replaceRegisteredRecipes(recipes)
+        discoverRecipesForOnlinePlayers(registeredKeys)
+        logger.info("Loaded $ruleCount mob rules and ${registeredKeys.size} recipes.")
     }
 
     private fun toBukkitRecipe(definition: RecipeDefinition): Recipe {
@@ -203,14 +209,13 @@ class FemItemsPlugin : JavaPlugin(), Listener {
             .deserialize(text)
             .decorationIfAbsent(TextDecoration.ITALIC, TextDecoration.State.FALSE)
 
-    private fun replaceRegisteredRecipes(definitions: List<RecipeDefinition>): Set<NamespacedKey> =
+    private fun replaceRegisteredRecipes(recipes: List<Recipe>): Set<NamespacedKey> =
         synchronized(recipeLock) {
             for (key in recipeKeys) {
                 Bukkit.removeRecipe(key)
             }
             recipeKeys.clear()
-            for (definition in definitions) {
-                val recipe = toBukkitRecipe(definition)
+            for (recipe in recipes) {
                 if (Bukkit.addRecipe(recipe)) {
                     recipeKeys.add(keyOf(recipe))
                 }
@@ -266,9 +271,10 @@ class FemItemsPlugin : JavaPlugin(), Listener {
 
         val drops = ConfigParser.rollDrops(rules, entity.type, customNamePlain)
         for (drop in drops) {
-            event.drops.add(
-                createItemStack(ItemDefinition(material = drop.material, amount = drop.amount, name = drop.name)),
-            )
+            val template = createItemStack(ItemDefinition(material = drop.material, amount = 1, name = drop.name))
+            for (stackSize in ConfigParser.splitIntoStacks(drop.amount, template.maxStackSize)) {
+                event.drops.add(template.clone().apply { amount = stackSize })
+            }
         }
     }
 

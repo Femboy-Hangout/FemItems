@@ -29,7 +29,7 @@ mobs:
       - { material: BOOK, min: 1, max: 1, chance: 0.25 }
       - { material: DIAMOND_SWORD, min: 1, max: 1, chance: 0.15 }
       - { material: NETHERITE_SCRAP, min: 1, max: 1, chance: 0.10 }
-      - { material: ECHO_SHARD, min: 1, max: 1, chance: 0.05, name: "&6Champion's Trophy" }
+      - { material: ECHO_SHARD, min: 1, max: 1, chance: 0.05, name: "&6&lChampion's Trophy" }
   dreadbound:
     entity: ANY
     name-contains: "Dreadbound"

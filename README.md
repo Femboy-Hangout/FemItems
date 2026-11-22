@@ -18,6 +18,16 @@ Build with the bundled Maven Wrapper and Java 25:
 
 Copy the shaded JAR `target/femitems-<version>.jar` into the `plugins` directory of a **Paper 26.3** or **Folia 26.3** server (running Java 25) and start it. On first startup, edit `plugins/FemItems/config.yml`, then run `/femitems reload` (or `/femi reload`). The command requires `femitems.reload` (operators by default).
 
+## Commands
+
+All commands require `femitems.reload` (operators by default). `/femi` is an alias for `/femitems`.
+
+| Command | What it does |
+| :--- | :--- |
+| `/femitems` | Shows an info panel: plugin version, platform (Paper/Folia), loaded mob rules & recipes, debug state, and clickable command shortcuts. |
+| `/femitems reload` | Reloads `config.yml`. On success it reports the loaded counts; on failure it reports the line number, and hovering the message shows the exact error. A failed reload leaves the previous config fully active. |
+| `/femitems debug` | Toggles mob-death diagnostics in the console. |
+
 The project compiles against Paper API 26.3, declares `folia-supported: true` in `paper-plugin.yml`, bundles `kotlin-stdlib` via `maven-shade-plugin`, and registers commands through Paper's Brigadier lifecycle API. Use `/femitems reload` for configuration updates and a server restart for plugin JAR updates.
 
 ## Automated CI/CD builds
@@ -49,7 +59,7 @@ Every push to GitHub runs [`.github/workflows/build.yml`](.github/workflows/buil
 
 ## Mob drop configuration
 
-Each `mobs` entry has an `entity` (Bukkit entity type, or `ANY`), optional `name-contains` (case-insensitive substring of the mob's custom name), and a list of `drops`. `ANY` skips only the base entity-type check; the name filter still applies, and it must be non-empty for `ANY`. For example, `entity: ANY` with `name-contains: "Champion"` matches any entity type whose custom name contains “Champion.” Drops are added to vanilla drops. Each drop supports `material`, `min`, `max`, `chance` (0.0 through 1.0), and optional `name`.
+Each `mobs` entry has an `entity` (Bukkit entity type, or `ANY`), optional `name-contains` (case-insensitive substring of the mob's custom name), and a list of `drops`. `ANY` skips only the base entity-type check; the name filter still applies, and it must be non-empty for `ANY`. For example, `entity: ANY` with `name-contains: "Champion"` matches any entity type whose custom name contains “Champion.” Drops are added to vanilla drops. Each drop supports `material`, `min`, `max`, `chance` (0.0 through 1.0), and optional `name` (with `&` color codes). Numbers may be quoted (`chance: "0.05"`); non-numeric values are reported as config errors. Counts above an item's max stack size (for example 100 arrows) drop as several valid stacks.
 
 The supplied archive's five loot tables have been converted into the default config. The assumed entity mappings are Skeleton/Archer and Zombie/Grunt; Champion, Dreadbound, and Ravager use `ANY` plus their custom-name substring because their base entity types were not specified. Change these matches to fit the arena's actual mobs. The archive did not specify those mappings.
 
@@ -84,7 +94,7 @@ Each string in `shape` is one crafting-grid row, read left to right. Every chara
  S
 ```
 
-The `ingredients` section tells the plugin which material each letter represents. The `result` section tells it what item to craft. For a normal iron sword, the three rows are ingot, ingot, stick; the centered spaces make that pattern line up like a sword in the 3×3 crafting grid.
+The `ingredients` section tells the plugin which material each letter represents. Every letter in `shape` must be defined in `ingredients`, and every letter in `ingredients` must appear in `shape`. The `result` section tells it what item to craft. For a normal iron sword, the three rows are ingot, ingot, stick; the centered spaces make that pattern line up like a sword in the 3×3 crafting grid.
 
 Recipe results can also have `lore` (a list of text lines), `enchants` (enchantment IDs mapped to levels), and `unbreakable: true`. Use Minecraft color codes with `&` in names and lore, such as `&5` for purple or `&l` for bold. Enchantment IDs use Minecraft names such as `power`, or fully namespaced IDs such as `minecraft:power`. Levels are applied as configured, including levels above the normal maximum. Enchanted book results store the configured enchantments as book enchantments.
 

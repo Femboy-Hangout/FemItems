@@ -63,9 +63,9 @@ object ConfigParser {
                 if (material == null || isAirMaterial(material)) {
                     throw IllegalArgumentException("Unknown drop material in mobs.$id: $materialName")
                 }
-                val min = intValue(raw["min"], 1)
-                val max = intValue(raw["max"], min)
-                val chance = doubleValue(raw["chance"], 1.0)
+                val min = intValue(raw["min"], 1, "mobs.$id.drops.min")
+                val max = intValue(raw["max"], min, "mobs.$id.drops.max")
+                val chance = doubleValue(raw["chance"], 1.0, "mobs.$id.drops.chance")
                 if (min < 1 || max < min || chance < 0.0 || chance > 1.0) {
                     throw IllegalArgumentException("Invalid count/chance in mobs.$id")
                 }
@@ -130,6 +130,11 @@ object ConfigParser {
                             if (ch != ' ' && !ingredients.containsKey(ch)) {
                                 throw IllegalArgumentException("recipes.$id.ingredients is missing symbol '$ch'")
                             }
+                        }
+                    }
+                    for (symbol in ingredients.keys) {
+                        if (shape.none { row -> row.contains(symbol) }) {
+                            throw IllegalArgumentException("recipes.$id.ingredients symbol '$symbol' is not used in shape")
                         }
                     }
                     recipes.add(
@@ -268,6 +273,23 @@ object ConfigParser {
         return rolled
     }
 
+    /**
+     * Splits [amount] into stack sizes no larger than [maxStackSize], so oversized drop counts
+     * (for example 100 arrows) become several valid stacks instead of one illegal stack.
+     */
+    fun splitIntoStacks(amount: Int, maxStackSize: Int): List<Int> {
+        if (amount <= 0) return emptyList()
+        val stackSize = maxStackSize.coerceAtLeast(1)
+        val stacks = ArrayList<Int>((amount + stackSize - 1) / stackSize)
+        var remaining = amount
+        while (remaining > 0) {
+            val next = minOf(remaining, stackSize)
+            stacks.add(next)
+            remaining -= next
+        }
+        return stacks
+    }
+
     fun findErrorLine(exception: Throwable, configFile: File): Int {
         var cause: Throwable? = exception
         while (cause != null) {
@@ -359,11 +381,22 @@ object ConfigParser {
         return message.replace(Regex("\\s+"), " ").trim()
     }
 
-    private fun intValue(value: Any?, fallback: Int): Int =
-        if (value is Number) value.toInt() else fallback
+    // Quoted numbers ("0.05") are accepted; anything non-numeric is an error instead of a silent fallback.
+    private fun intValue(value: Any?, fallback: Int, path: String): Int = when (value) {
+        null -> fallback
+        is Int, is Long, is Short, is Byte -> (value as Number).toInt()
+        is String -> value.trim().toIntOrNull()
+            ?: throw IllegalArgumentException("$path must be a whole number, got '$value'")
+        else -> throw IllegalArgumentException("$path must be a whole number, got '$value'")
+    }
 
-    private fun doubleValue(value: Any?, fallback: Double): Double =
-        if (value is Number) value.toDouble() else fallback
+    private fun doubleValue(value: Any?, fallback: Double, path: String): Double = when (value) {
+        null -> fallback
+        is Number -> value.toDouble()
+        is String -> value.trim().toDoubleOrNull()
+            ?: throw IllegalArgumentException("$path must be a number, got '$value'")
+        else -> throw IllegalArgumentException("$path must be a number, got '$value'")
+    }
 
     private fun leadingSpaces(line: String): Int {
         var count = 0

@@ -203,6 +203,8 @@ class FakePlayerClient(
 
     fun receivedItemCount(): Int = receivedItems.size
 
+    fun receivedItemsSnapshot(): List<ItemStack> = receivedItems.toList()
+
     fun awaitItemMatching(
         description: String,
         sinceIndex: Int = 0,

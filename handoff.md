@@ -11,7 +11,8 @@ For mandatory coding standards, Folia rules, version bumping, and testing workfl
 - **Build & Runtime:** Maven Wrapper (`./mvnw` / `.\mvnw.cmd`), Kotlin `2.4.21`, Java 25 (`maven.compiler.release = 25`), Paper API `26.3.build.255-stable`, `maven-shade-plugin:3.6.2` (bundles `kotlin-stdlib`; `paper-api` stays `provided`).
 - **Descriptor:** `src/main/resources/paper-plugin.yml` declares `folia-supported: true`, `api-version: '26.3'`, and filters `version: '${project.version}'` from `pom.xml`.
 - **Folia-safe Kotlin codebase (`src/main/kotlin/dev/femitems/plugin/`):**
-  - `FemItemsPlugin.kt`: Brigadier commands (`/femitems` & `/femi` with `reload` and `debug`), thread-safe `@Volatile` mob rule and recipe-key snapshots, `AtomicBoolean` debug flag, `GlobalRegionScheduler` for runtime recipe reloads, Folia-safe `entity.scheduler` recipe book discovery for online players on reload plus `PlayerJoinEvent` auto-unlock on join, Adventure `Component` API with `&` legacy color code support (no deprecated `ChatColor`), recipe result metadata (`lore`, `unbreakable`, unsafe/stored `enchants`), and Paper/Folia platform detection via `ServerBuildInfo`.
+  - `Messages.kt` (v1.3.0): Adventure/MiniMessage chat styling: pink→lavender gradient `[FemItems]` prefix, reload counts, config-error hover details, and the clickable `/femitems` info panel. Plain-text output is pinned by `MessagesTest` because live tests/smoke scripts match on it.
+  - `FemItemsPlugin.kt`: Brigadier commands (`/femitems` & `/femi`: bare info panel, `reload`, and `debug`), all-or-nothing reloads (Bukkit recipes are built before any live state is swapped), oversized drop counts split into max-stack-size stacks, thread-safe `@Volatile` mob rule and recipe-key snapshots, `AtomicBoolean` debug flag, `GlobalRegionScheduler` for runtime recipe reloads, Folia-safe `entity.scheduler` recipe book discovery for online players on reload plus `PlayerJoinEvent` auto-unlock on join, Adventure `Component` API with `&` legacy color code support (no deprecated `ChatColor`), recipe result metadata (`lore`, `unbreakable`, unsafe/stored `enchants`), and Paper/Folia platform detection via `ServerBuildInfo`.
   - `ConfigModels.kt` & `ConfigParser.kt`: Pure Kotlin models, YAML parsing/validation (including recipe metadata & enchantments with injectable registry seam for unit tests), color-stripping name matching, drop rolling, and line-number error reporting.
 - **Testing & CI:**
   - JUnit 5 unit tests under `src/test/kotlin/dev/femitems/plugin/`.
@@ -25,6 +26,22 @@ For mandatory coding standards, Folia rules, version bumping, and testing workfl
 `forsaken_loot.zip` contains `archer.json`, `champion.json`, `grunt.json`, `ravager.json`, and `dreadbound.jason`. The latter is a typo and is not a valid datapack JSON table filename. The tables are stored at `data/forsaken/loot_table/`, not attached to entity loot tables, so the vanilla game will not select them for mob deaths. No recipes are present. `pack.mcmeta` declares data pack format 121.
 
 The default plugin config preserves the listed items, random count ranges, drop probabilities, and colorized Champion's Trophy display name. Random enchantment behavior specified by two datapack entries is not implemented yet.
+
+## v1.3.0 review fixes
+
+- A shaped recipe that defined an ingredient letter not present in `shape` passed validation, then threw inside the `GlobalRegionScheduler` task, after old recipes were removed and after the player was told "Config reloaded." The parser now rejects it, and reloads build every Bukkit recipe before changing live state.
+- Quoted drop numbers (`chance: "0.05"`) used to silently fall back to defaults (a 5% drop became 100%). They are now parsed, and non-numeric values are config errors.
+- Drop counts above an item's max stack size are split into valid stacks.
+- Champion's Trophy is now gold **and bold** (`&6&l`), matching `champion.json`.
+- `femitems.reload` is declared in `paper-plugin.yml` (default `op`). Reload failures now log the actual reason, not just the line number, and the doubled `[FemItems] [FemItems]` log prefix is gone.
+
+## Live-test gotcha
+
+On Folia 26.3, the console command `clear <player> <item> 0` replies `Found 1 matching item(s)` no matter how many items are actually there. Don't assert exact counts with it. Assert stack sizes from the fake client's inventory packets instead (`FakePlayerClient.receivedItemsSnapshot()` / `awaitItemMatching`).
+
+## Repo hygiene notes
+
+- `.idea/` and `forsaken-loot.iml` are tracked in git even though `.gitignore` excludes them. `forsaken-loot.iml` is a stale leftover from the old project name. Consider `git rm --cached -r .idea forsaken-loot.iml`.
 
 ## Open gameplay follow-ups
 
