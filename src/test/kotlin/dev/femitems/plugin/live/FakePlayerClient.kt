@@ -25,11 +25,46 @@ import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.Serverbound
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.level.ServerboundAcceptTeleportationPacket
 import java.time.Duration
 import java.time.Instant
-import java.util.concurrent.CopyOnWriteArrayList
+import java.util.ArrayDeque
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
+
+internal class BoundedEventBuffer<T>(private val capacity: Int) {
+    private val entries = ArrayDeque<T>()
+    private var totalAdded = 0
+
+    init {
+        require(capacity > 0) { "capacity must be greater than zero" }
+    }
+
+    @Synchronized
+    fun add(value: T) {
+        entries.addLast(value)
+        totalAdded++
+        if (entries.size > capacity) entries.removeFirst()
+    }
+
+    @Synchronized
+    fun count(): Int = totalAdded
+
+    @Synchronized
+    fun snapshot(): List<T> = entries.toList()
+
+    @Synchronized
+    fun snapshotSince(index: Int): List<T> {
+        val oldestRetainedIndex = totalAdded - entries.size
+        val skip = (index - oldestRetainedIndex).coerceAtLeast(0)
+        return entries.drop(skip)
+    }
+
+    @Synchronized
+    fun clear() {
+        entries.clear()
+        totalAdded = 0
+    }
+}
 
 /**
  * Headless Minecraft 26.3 fake player backed by MCProtocolLib.
@@ -47,8 +82,8 @@ class FakePlayerClient(
     private val spawnedLatch = CountDownLatch(1)
     private val loadedSent = AtomicBoolean(false)
     private val disconnectReason = AtomicReference<String?>()
-    private val chatMessages = CopyOnWriteArrayList<String>()
-    private val receivedItems = CopyOnWriteArrayList<ItemStack>()
+    private val chatMessages = BoundedEventBuffer<String>(MAX_CAPTURED_EVENTS)
+    private val receivedItems = BoundedEventBuffer<ItemStack>(MAX_CAPTURED_EVENTS)
 
     private var session: ClientNetworkSession? = null
 
@@ -148,9 +183,9 @@ class FakePlayerClient(
         }
     }
 
-    fun chatCount(): Int = chatMessages.size
+    fun chatCount(): Int = chatMessages.count()
 
-    fun chatMessagesSnapshot(): List<String> = chatMessages.toList()
+    fun chatMessagesSnapshot(): List<String> = chatMessages.snapshot()
 
     fun sendCommand(command: String) {
         val active = checkNotNull(session) { "Fake player '$username' is not connected" }
@@ -167,10 +202,10 @@ class FakePlayerClient(
     ): String {
         val deadline = Instant.now().plus(timeout)
         while (Instant.now().isBefore(deadline)) {
-            val snapshot = chatMessages.toList()
-            for (i in sinceIndex until snapshot.size) {
-                if (snapshot[i].contains(substring)) {
-                    return snapshot[i]
+            val snapshot = chatMessages.snapshotSince(sinceIndex)
+            for (message in snapshot) {
+                if (message.contains(substring)) {
+                    return message
                 }
             }
             if (disconnectReason.get() != null) {
@@ -183,7 +218,7 @@ class FakePlayerClient(
         }
         throw AssertionError(
             "Timed out waiting for fake player '$username' to receive chat containing '$substring'. " +
-                "Messages since $sinceIndex: ${chatMessages.toList().drop(sinceIndex)}",
+                "Messages since $sinceIndex: ${chatMessages.snapshotSince(sinceIndex)}",
         )
     }
 
@@ -193,7 +228,7 @@ class FakePlayerClient(
         waitDuration: Duration = Duration.ofSeconds(2),
     ) {
         Thread.sleep(waitDuration.toMillis())
-        val recent = chatMessages.toList().drop(sinceIndex)
+        val recent = chatMessages.snapshotSince(sinceIndex)
         if (recent.any { it.contains(substring) }) {
             throw AssertionError(
                 "Fake player '$username' unexpectedly received chat containing '$substring': $recent",
@@ -201,7 +236,7 @@ class FakePlayerClient(
         }
     }
 
-    fun receivedItemCount(): Int = receivedItems.size
+    fun receivedItemCount(): Int = receivedItems.count()
 
     fun awaitItemMatching(
         description: String,
@@ -211,10 +246,10 @@ class FakePlayerClient(
     ): ItemStack {
         val deadline = Instant.now().plus(timeout)
         while (Instant.now().isBefore(deadline)) {
-            val snapshot = receivedItems.toList()
-            for (i in sinceIndex until snapshot.size) {
-                if (predicate(snapshot[i])) {
-                    return snapshot[i]
+            val snapshot = receivedItems.snapshotSince(sinceIndex)
+            for (item in snapshot) {
+                if (predicate(item)) {
+                    return item
                 }
             }
             if (disconnectReason.get() != null) {
@@ -226,14 +261,21 @@ class FakePlayerClient(
         }
         throw AssertionError(
             "Timed out waiting for fake player '$username' to receive item ($description). " +
-                "Items since $sinceIndex: ${receivedItems.toList().drop(sinceIndex)}",
+                "Items since $sinceIndex: ${receivedItems.snapshotSince(sinceIndex)}",
         )
     }
 
     override fun close() {
         val active = session ?: return
+        session = null
         if (active.isConnected) {
             active.disconnect("Integration test complete")
         }
+        chatMessages.clear()
+        receivedItems.clear()
+    }
+
+    private companion object {
+        const val MAX_CAPTURED_EVENTS = 512
     }
 }
