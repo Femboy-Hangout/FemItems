@@ -14,6 +14,10 @@ class MessagesTest {
     fun `styled messages keep stable plain-text output`() {
         assertEquals("[FemItems] Config reloaded. (5 mob rules, 8 recipes)", plain(Messages.reloaded(5, 8)))
         assertEquals(
+            "[FemItems] A reload is already in progress; please wait.",
+            plain(Messages.reloadInProgress()),
+        )
+        assertEquals(
             "[FemItems] Config error at line 5. (hover for details)",
             plain(Messages.configError(5, "Unknown drop material")),
         )

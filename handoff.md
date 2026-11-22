@@ -6,7 +6,7 @@ Maintain **FemItems**, a **Kotlin + Java 25** Maven native **Paper 26.3 & Folia 
 
 For mandatory coding standards, Folia rules, version bumping, and testing workflows, see [AGENTS.md](AGENTS.md).
 
-**Current version:** `1.3.0` on `main` (review fixes + styled chat + `/femitems` info panel). The next plugin change should bump to `1.3.1` (fix) or `1.4.0` (feature).
+**Current version:** `1.3.2` on `main` (async `/femitems reload`; recipe diffing so reloads trigger at most 2 server-wide resyncs, 0 if recipes are unchanged). The next plugin change should bump to `1.3.3` (fix) or `1.4.0` (feature).
 
 ## Current implementation
 
@@ -51,3 +51,7 @@ On Folia 26.3, the console command `clear <player> <item> 0` replies `Found 1 ma
 1. Use `/femitems debug` on the production server to confirm entity types/custom names for arena mobs, then adjust `plugins/FemItems/config.yml` if needed.
 2. Decide whether the enchanted book/sword drops need configurable random vanilla enchantments against Paper 26.3's API.
 3. Adjust or expand the default crafting recipes under `recipes` in `plugins/FemItems/config.yml` as desired.
+
+## Recipe resync gotcha (Paper/Folia 26.3)
+
+Every recipe-manager change ends in `RecipeManager.finalizeRecipeLoading()` → `PlayerList.reloadResources()`, which for **every online player** re-reads advancements from disk and re-sends all advancements, tags and the full recipe book. `Bukkit.addRecipe(recipe, false)` / `removeRecipe(key, false)` **ignore** the `resend` flag (they're default interface methods), so per-recipe calls cause one full resync per recipe (8 recipes → 16 resyncs per reload, visible client-side as repeated "Loaded 885 advancements"). Always use `Bukkit.addRecipes(...)` / `Bukkit.removeRecipes(...)` (one resync per call) and diff definitions so unchanged recipes aren't touched. The live test counts `ClientboundUpdateRecipesPacket`s to guard this.

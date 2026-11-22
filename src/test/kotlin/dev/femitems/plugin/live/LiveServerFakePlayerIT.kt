@@ -6,6 +6,7 @@ import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
 import java.time.Duration
+import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
@@ -159,12 +160,58 @@ class LiveServerFakePlayerIT {
                     // 5. Player-initiated /femitems reload (tests player region thread -> GlobalRegionScheduler -> entity.scheduler on Folia!)
                     val opChatBeforeReload = opPlayer.chatCount()
                     val logBeforeReload = server.readLog().length
+                    val resyncsBeforeReload = opPlayer.recipeResyncCount()
                     opPlayer.sendCommand("femitems reload")
                     opPlayer.awaitChatContaining(
                         "[FemItems] Config reloaded. (1 mob rules, 3 recipes)",
                         sinceIndex = opChatBeforeReload,
                     )
                     server.awaitLog(Regex("""Loaded 1 mob rules and 3 recipes\."""), fromOffset = logBeforeReload)
+
+                    // Every recipe-manager change makes the server re-send advancements, tags and the full recipe
+                    // book to every player. Swapping 8 default recipes for 3 new ones must cost at most one batch
+                    // removal + one batch addition (it used to be one resync per recipe: 11+ here, 16 in prod).
+                    Thread.sleep(500)
+                    val reloadResyncs = opPlayer.recipeResyncCount() - resyncsBeforeReload
+                    assertTrue(
+                        reloadResyncs in 1..2,
+                        "[$platform] Changed-recipe reload caused $reloadResyncs recipe resyncs; expected 1..2",
+                    )
+                    val resyncsBeforeUnchanged = opPlayer.recipeResyncCount()
+
+                    // 5b. Async reload: back-to-back reloads must never overlap or double-apply. Each one either
+                    //     completes or is rejected with the in-progress notice; at least one must complete.
+                    val opChatBeforeBurst = opPlayer.chatCount()
+                    opPlayer.sendCommand("femitems reload")
+                    opPlayer.sendCommand("femitems reload")
+                    opPlayer.awaitChatContaining(
+                        "[FemItems] Config reloaded. (1 mob rules, 3 recipes)",
+                        sinceIndex = opChatBeforeBurst,
+                    )
+                    Thread.sleep(1000)
+                    val burstReplies = opPlayer.chatMessagesSnapshot().drop(opChatBeforeBurst)
+                        .filter { it.startsWith("[FemItems]") }
+                    assertTrue(
+                        burstReplies.size == 2 && burstReplies.all {
+                            it == "[FemItems] Config reloaded. (1 mob rules, 3 recipes)" ||
+                                it == "[FemItems] A reload is already in progress; please wait."
+                        },
+                        "[$platform] Unexpected replies to back-to-back reloads: $burstReplies",
+                    )
+
+                    // 5c. Console-initiated reload (global region -> AsyncScheduler -> global region)
+                    val logBeforeConsoleReload = server.readLog().length
+                    server.sendConsoleCommand("femitems reload")
+                    server.awaitLog(Regex("""Loaded 1 mob rules and 3 recipes\."""), fromOffset = logBeforeConsoleReload)
+
+                    // Reloads with unchanged recipes (5b + 5c) must not touch the recipe manager at all.
+                    Thread.sleep(500)
+                    val unchangedResyncs = opPlayer.recipeResyncCount() - resyncsBeforeUnchanged
+                    assertEquals(
+                        0,
+                        unchangedResyncs,
+                        "[$platform] Reloads with unchanged recipes caused $unchangedResyncs recipe resyncs",
+                    )
 
                     // Allow 1-tick entity.scheduler recipe discovery task to complete for online players
                     Thread.sleep(500)

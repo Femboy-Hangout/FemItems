@@ -16,6 +16,7 @@ import org.geysermc.mcprotocollib.protocol.data.game.setting.SkinPart
 import org.geysermc.mcprotocollib.protocol.packet.common.serverbound.ServerboundClientInformationPacket
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.ClientboundLoginPacket
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.ClientboundSystemChatPacket
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.ClientboundUpdateRecipesPacket
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.player.ClientboundPlayerPositionPacket
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.inventory.ClientboundContainerSetContentPacket
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.inventory.ClientboundContainerSetSlotPacket
@@ -29,6 +30,7 @@ import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
 /**
@@ -49,6 +51,7 @@ class FakePlayerClient(
     private val disconnectReason = AtomicReference<String?>()
     private val chatMessages = CopyOnWriteArrayList<String>()
     private val receivedItems = CopyOnWriteArrayList<ItemStack>()
+    private val recipeResyncs = AtomicInteger(0)
 
     private var session: ClientNetworkSession? = null
 
@@ -97,6 +100,10 @@ class FakePlayerClient(
                         session.send(ServerboundClientTickEndPacket.INSTANCE)
                         spawnedLatch.countDown()
                     }
+
+                    // Sent once per server-wide recipe/resource resync (PlayerList.reloadResources),
+                    // which also re-reads and re-sends every player's advancements. Expensive.
+                    is ClientboundUpdateRecipesPacket -> recipeResyncs.incrementAndGet()
 
                     is ClientboundSystemChatPacket -> {
                         val plain = PlainTextComponentSerializer.plainText().serialize(packet.content)
@@ -149,6 +156,9 @@ class FakePlayerClient(
     }
 
     fun chatCount(): Int = chatMessages.size
+
+    /** Number of full recipe resyncs (ClientboundUpdateRecipesPacket) received since connecting. */
+    fun recipeResyncCount(): Int = recipeResyncs.get()
 
     fun chatMessagesSnapshot(): List<String> = chatMessages.toList()
 

@@ -34,6 +34,9 @@ object Messages {
         Placeholder.unparsed("recipes", recipes.toString()),
     )
 
+    fun reloadInProgress(): Component =
+        render("<color:$MUTED>A reload is already in progress; please wait.</color>")
+
     fun configError(line: Int?, detail: String): Component {
         val text = if (line != null) "Config error at line $line." else "Config error; see console."
         return render("<color:$ERROR><text></color> <color:$MUTED><italic>(hover for details)</italic></color>",
