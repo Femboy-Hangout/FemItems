@@ -41,7 +41,7 @@ On Folia 26.3, the console command `clear <player> <item> 0` replies `Found 1 ma
 
 ## Repo hygiene notes
 
-- `.idea/` and `forsaken-loot.iml` are tracked in git even though `.gitignore` excludes them. `forsaken-loot.iml` is a stale leftover from the old project name. Consider `git rm --cached -r .idea forsaken-loot.iml`.
+- IDE files (`.idea/`, `*.iml`) are no longer tracked; `.gitignore` excludes them. Keep IntelliJ project config local.
 
 ## Open gameplay follow-ups
 
