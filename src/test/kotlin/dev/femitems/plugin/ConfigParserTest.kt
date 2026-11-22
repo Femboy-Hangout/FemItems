@@ -82,7 +82,7 @@ class ConfigParserTest {
         assertNull(champion.type)
         assertEquals("Champion", champion.nameContains)
         val trophy = champion.drops.first { it.material == Material.ECHO_SHARD }
-        assertEquals("&6Champion's Trophy", trophy.name)
+        assertEquals("&6&lChampion's Trophy", trophy.name)
 
         val soulpiercer = parsed.recipes.first { it.id == "soulpiercer_bow" } as ShapedRecipeDefinition
         assertEquals(Material.BOW, soulpiercer.result.material)
@@ -404,5 +404,73 @@ class ConfigParserTest {
 
         assertNotNull(ConfigParser.conciseError(IllegalArgumentException("  spaced \n error  ")))
         assertEquals("spaced error", ConfigParser.conciseError(IllegalArgumentException("  spaced \n error  ")))
+    }
+
+    @Test
+    fun `rejects shaped ingredient symbols that never appear in the shape`() {
+        val unusedSymbol = YamlConfiguration().apply {
+            loadFromString(
+                """
+                recipes:
+                  unused_symbol:
+                    type: shaped
+                    shape:
+                      - "I"
+                    ingredients:
+                      I: IRON_INGOT
+                      X: DIAMOND
+                    result:
+                      material: IRON_SWORD
+                """.trimIndent(),
+            )
+        }
+        val error = assertThrows<IllegalArgumentException> {
+            ConfigParser.parse(unusedSymbol, testMaxStackSize, testEnchantmentValidator)
+        }
+        assertTrue(error.message!!.contains("'X' is not used in shape"), error.message)
+    }
+
+    @Test
+    fun `quoted numeric drop values are parsed instead of silently ignored`() {
+        val quoted = YamlConfiguration().apply {
+            loadFromString(
+                """
+                mobs:
+                  quoted:
+                    entity: ZOMBIE
+                    drops:
+                      - { material: COAL, min: "2", max: "4", chance: "0.05" }
+                """.trimIndent(),
+            )
+        }
+        val drop = ConfigParser.parse(quoted, testMaxStackSize, testEnchantmentValidator).mobRules.single().drops.single()
+        assertEquals(2, drop.min)
+        assertEquals(4, drop.max)
+        assertEquals(0.05, drop.chance)
+
+        val garbage = YamlConfiguration().apply {
+            loadFromString(
+                """
+                mobs:
+                  garbage:
+                    entity: ZOMBIE
+                    drops:
+                      - { material: COAL, min: 1, max: 1, chance: "often" }
+                """.trimIndent(),
+            )
+        }
+        val error = assertThrows<IllegalArgumentException> {
+            ConfigParser.parse(garbage, testMaxStackSize, testEnchantmentValidator)
+        }
+        assertTrue(error.message!!.contains("mobs.garbage.drops.chance must be a number"), error.message)
+    }
+
+    @Test
+    fun `splitIntoStacks never exceeds the max stack size`() {
+        assertEquals(listOf(64, 36), ConfigParser.splitIntoStacks(100, 64))
+        assertEquals(listOf(1, 1, 1), ConfigParser.splitIntoStacks(3, 1))
+        assertEquals(listOf(16), ConfigParser.splitIntoStacks(16, 16))
+        assertEquals(emptyList(), ConfigParser.splitIntoStacks(0, 64))
+        assertEquals(listOf(1, 1), ConfigParser.splitIntoStacks(2, 0))
     }
 }

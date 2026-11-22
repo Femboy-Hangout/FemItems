@@ -6,6 +6,7 @@ import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
 import java.time.Duration
+import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
@@ -91,6 +92,15 @@ class LiveServerFakePlayerIT {
                     server.sendConsoleCommand("op FakeOp")
                     server.awaitLog(Regex("""Made FakeOp a server operator"""), fromOffset = logBeforeOp)
 
+                    // Verify the bare /femitems info panel shows version, platform, and default counts
+                    val opChatBeforeInfo = opPlayer.chatCount()
+                    opPlayer.sendCommand("femitems")
+                    opPlayer.awaitChatContaining(
+                        "[FemItems] v$pluginVersion on $expectedPlatformLabel",
+                        sinceIndex = opChatBeforeInfo,
+                    )
+                    opPlayer.awaitChatContaining("5 mob rules · 8 recipes · debug off", sinceIndex = opChatBeforeInfo)
+
                     // 3. Verify non-OP fake player cannot run /femitems reload
                     val guestChatMark = guestPlayer.chatCount()
                     guestPlayer.sendCommand("femitems reload")
@@ -107,6 +117,7 @@ class LiveServerFakePlayerIT {
                             drops:
                               - { material: ECHO_SHARD, min: 1, max: 1, chance: 1.0, name: "&6Champion's Trophy" }
                               - { material: GOLD_INGOT, min: 2, max: 2, chance: 1.0 }
+                              - { material: ARROW, min: 70, max: 70, chance: "1.0" }
                         recipes:
                           arena_blade:
                             type: shaped
@@ -149,9 +160,58 @@ class LiveServerFakePlayerIT {
                     // 5. Player-initiated /femitems reload (tests player region thread -> GlobalRegionScheduler -> entity.scheduler on Folia!)
                     val opChatBeforeReload = opPlayer.chatCount()
                     val logBeforeReload = server.readLog().length
+                    val resyncsBeforeReload = opPlayer.recipeResyncCount()
                     opPlayer.sendCommand("femitems reload")
-                    opPlayer.awaitChatContaining("[FemItems] Config reloaded.", sinceIndex = opChatBeforeReload)
+                    opPlayer.awaitChatContaining(
+                        "[FemItems] Config reloaded. (1 mob rules, 3 recipes)",
+                        sinceIndex = opChatBeforeReload,
+                    )
                     server.awaitLog(Regex("""Loaded 1 mob rules and 3 recipes\."""), fromOffset = logBeforeReload)
+
+                    // Every recipe-manager change makes the server re-send advancements, tags and the full recipe
+                    // book to every player. Swapping 8 default recipes for 3 new ones must cost at most one batch
+                    // removal + one batch addition (it used to be one resync per recipe: 11+ here, 16 in prod).
+                    Thread.sleep(500)
+                    val reloadResyncs = opPlayer.recipeResyncCount() - resyncsBeforeReload
+                    assertTrue(
+                        reloadResyncs in 1..2,
+                        "[$platform] Changed-recipe reload caused $reloadResyncs recipe resyncs; expected 1..2",
+                    )
+                    val resyncsBeforeUnchanged = opPlayer.recipeResyncCount()
+
+                    // 5b. Async reload: back-to-back reloads must never overlap or double-apply. Each one either
+                    //     completes or is rejected with the in-progress notice; at least one must complete.
+                    val opChatBeforeBurst = opPlayer.chatCount()
+                    opPlayer.sendCommand("femitems reload")
+                    opPlayer.sendCommand("femitems reload")
+                    opPlayer.awaitChatContaining(
+                        "[FemItems] Config reloaded. (1 mob rules, 3 recipes)",
+                        sinceIndex = opChatBeforeBurst,
+                    )
+                    Thread.sleep(1000)
+                    val burstReplies = opPlayer.chatMessagesSnapshot().drop(opChatBeforeBurst)
+                        .filter { it.startsWith("[FemItems]") }
+                    assertTrue(
+                        burstReplies.size == 2 && burstReplies.all {
+                            it == "[FemItems] Config reloaded. (1 mob rules, 3 recipes)" ||
+                                it == "[FemItems] A reload is already in progress; please wait."
+                        },
+                        "[$platform] Unexpected replies to back-to-back reloads: $burstReplies",
+                    )
+
+                    // 5c. Console-initiated reload (global region -> AsyncScheduler -> global region)
+                    val logBeforeConsoleReload = server.readLog().length
+                    server.sendConsoleCommand("femitems reload")
+                    server.awaitLog(Regex("""Loaded 1 mob rules and 3 recipes\."""), fromOffset = logBeforeConsoleReload)
+
+                    // Reloads with unchanged recipes (5b + 5c) must not touch the recipe manager at all.
+                    Thread.sleep(500)
+                    val unchangedResyncs = opPlayer.recipeResyncCount() - resyncsBeforeUnchanged
+                    assertEquals(
+                        0,
+                        unchangedResyncs,
+                        "[$platform] Reloads with unchanged recipes caused $unchangedResyncs recipe resyncs",
+                    )
 
                     // Allow 1-tick entity.scheduler recipe discovery task to complete for online players
                     Thread.sleep(500)
@@ -227,6 +287,19 @@ class LiveServerFakePlayerIT {
                         fromOffset = logBeforeGoldCheck,
                     )
 
+                    // 70 arrows (quoted chance) must arrive as valid stacks (64 + 6), never one illegal 70-stack.
+                    // Checked via client inventory packets: Folia's `clear <player> <item> 0` count is not reliable.
+                    opPlayer.awaitItemMatching(
+                        description = "full 64-arrow stack from oversized drop",
+                        sinceIndex = itemCountBeforeKill,
+                    ) { item -> item.amount == 64 }
+                    opPlayer.awaitItemMatching(
+                        description = "6-arrow remainder stack from oversized drop",
+                        sinceIndex = itemCountBeforeKill,
+                    ) { item -> item.amount == 6 }
+                    val oversized = opPlayer.receivedItemsSnapshot().drop(itemCountBeforeKill).filter { it.amount > 64 }
+                    assertTrue(oversized.isEmpty(), "[$platform] Received stacks above 64: $oversized")
+
                     // Toggle debug back off
                     val opChatBeforeDebugOff = opPlayer.chatCount()
                     opPlayer.sendCommand("femitems debug")
@@ -265,10 +338,38 @@ class LiveServerFakePlayerIT {
                     val opChatBeforeBadEnchant = opPlayer.chatCount()
                     opPlayer.sendCommand("femitems reload")
                     opPlayer.awaitChatContaining("[FemItems] Config error at line 8.", sinceIndex = opChatBeforeBadEnchant)
+
+                    // 9. A shaped ingredient symbol missing from the shape must fail the reload up front
+                    //    (not report success and then wipe recipes on the global region thread)
+                    Files.writeString(
+                        server.pluginConfigFile(),
+                        """
+                        recipes:
+                          bad_shape:
+                            type: shaped
+                            shape:
+                              - "I"
+                            ingredients:
+                              I: IRON_INGOT
+                              X: DIAMOND
+                            result:
+                              material: IRON_SWORD
+                        """.trimIndent() + "\n",
+                        StandardCharsets.UTF_8,
+                    )
+                    val opChatBeforeBadShape = opPlayer.chatCount()
+                    opPlayer.sendCommand("femitems reload")
+                    opPlayer.awaitChatContaining("[FemItems] Config error at line 6.", sinceIndex = opChatBeforeBadShape)
+                    opPlayer.assertNoChatContaining("[FemItems] Config reloaded.", sinceIndex = opChatBeforeBadShape)
+
+                    // Previously loaded recipes must still be registered after all the failed reloads
+                    val logBeforeGive = server.readLog().length
+                    server.sendConsoleCommand("recipe give FakeOp femitems:arena_blade")
+                    server.awaitLog(Regex("""Unlocked 1 recipe\(s\) for FakeOp"""), fromOffset = logBeforeGive)
                 }
             }
 
-            // 9. Clean server shutdown & assert zero plugin/Folia errors in logs
+            // 10. Clean server shutdown & assert zero plugin/Folia errors in logs
             server.stopAndAssertClean()
         }
     }

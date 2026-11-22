@@ -55,6 +55,7 @@ This plugin **must** run identically on both **Paper** and **Folia** from a sing
 | `mvnw`, `mvnw.cmd`, `.mvn/` | Maven Wrapper scripts (use these for all builds) |
 | `src/main/kotlin/dev/femitems/plugin/FemItemsPlugin.kt` | Paper/Folia `JavaPlugin` entrypoint, Brigadier commands, event listener, recipe registration |
 | `src/main/kotlin/dev/femitems/plugin/ConfigModels.kt` | Immutable Kotlin data models for rules, recipes, and rolled drops |
+| `src/main/kotlin/dev/femitems/plugin/Messages.kt` | Styled Adventure/MiniMessage chat output (gradient prefix, hover details, clickable commands). Keep each message's plain-text form stable — live tests and smoke scripts match on it |
 | `src/main/kotlin/dev/femitems/plugin/ConfigParser.kt` | Pure YAML config parsing, validation, drop rolling, and line-number error reporting |
 | `src/main/resources/paper-plugin.yml` | Native Paper/Folia plugin descriptor (`folia-supported: true`, filtered version) |
 | `src/main/resources/config.yml` | Default mob drops and recipes configuration |
@@ -120,7 +121,8 @@ What `LiveServerFakePlayerIT` verifies automatically on **both Paper 26.3 and Fo
 4. Verifies non-OP permission denial (`FakeGuest` cannot run `/femitems reload`).
 5. Verifies player-initiated `/femitems reload` (exercising player region thread → `GlobalRegionScheduler` recipe updates on Folia) and live registration of both shaped and shapeless custom recipes in Minecraft's `RecipeManager`.
 6. Verifies player-initiated `/femitems debug`, summoning & killing a custom-named mob in the live world, and receiving the expected custom drops (including custom Adventure display names and exact stack counts) directly in `FakeOp`'s Minecraft client inventory packets.
-7. Verifies invalid config reload error-line reporting without crashing.
+7. Verifies invalid config reload error-line reporting without crashing, and that a failed reload (including a shaped ingredient symbol missing from the shape) keeps previously registered recipes intact.
+   Also verifies the bare `/femitems` info panel, reload counts, and that oversized drops (70 arrows) arrive split into valid stacks.
 8. Disconnects fake players cleanly, shuts down each server with exit code `0`, and fails on any `FemItems` exception, `UnsupportedOperationException`, or Folia region-thread violation.
 
 ### Step 5: Interactive In-Game Testing (When Needed)
