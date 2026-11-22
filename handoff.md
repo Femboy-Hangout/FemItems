@@ -6,6 +6,8 @@ Maintain **FemItems**, a **Kotlin + Java 25** Maven native **Paper 26.3 & Folia 
 
 For mandatory coding standards, Folia rules, version bumping, and testing workflows, see [AGENTS.md](AGENTS.md).
 
+**Current version:** `1.3.0` on `main` (review fixes + styled chat + `/femitems` info panel). The next plugin change should bump to `1.3.1` (fix) or `1.4.0` (feature).
+
 ## Current implementation
 
 - **Build & Runtime:** Maven Wrapper (`./mvnw` / `.\mvnw.cmd`), Kotlin `2.4.21`, Java 25 (`maven.compiler.release = 25`), Paper API `26.3.build.255-stable`, `maven-shade-plugin:3.6.2` (bundles `kotlin-stdlib`; `paper-api` stays `provided`).
@@ -15,7 +17,8 @@ For mandatory coding standards, Folia rules, version bumping, and testing workfl
   - `FemItemsPlugin.kt`: Brigadier commands (`/femitems` & `/femi`: bare info panel, `reload`, and `debug`), all-or-nothing reloads (Bukkit recipes are built before any live state is swapped), oversized drop counts split into max-stack-size stacks, thread-safe `@Volatile` mob rule and recipe-key snapshots, `AtomicBoolean` debug flag, `GlobalRegionScheduler` for runtime recipe reloads, Folia-safe `entity.scheduler` recipe book discovery for online players on reload plus `PlayerJoinEvent` auto-unlock on join, Adventure `Component` API with `&` legacy color code support (no deprecated `ChatColor`), recipe result metadata (`lore`, `unbreakable`, unsafe/stored `enchants`), and Paper/Folia platform detection via `ServerBuildInfo`.
   - `ConfigModels.kt` & `ConfigParser.kt`: Pure Kotlin models, YAML parsing/validation (including recipe metadata & enchantments with injectable registry seam for unit tests), color-stripping name matching, drop rolling, and line-number error reporting.
 - **Testing & CI:**
-  - JUnit 5 unit tests under `src/test/kotlin/dev/femitems/plugin/`.
+  - JUnit 5 unit tests under `src/test/kotlin/dev/femitems/plugin/` (15 tests: `ConfigParserTest`, `MessagesTest`, `PluginDescriptorTest`).
+  - The live suite also covers: the bare `/femitems` info panel, reload counts, a 70-arrow drop arriving as 64 + 6 stacks with nothing above 64, and a failed reload (unused shaped symbol) leaving existing recipes registered.
   - Automated live Paper 26.3 & Folia 26.3 fake-player functional tests (`src/test/kotlin/dev/femitems/plugin/live/LiveServerFakePlayerIT.kt` using test-scoped MCProtocolLib `26.3-3`), run via `./mvnw -B verify -P live-test` (or `.\mvnw.cmd -B verify -P live-test`).
   - Interactive local dev server launchers (`scripts/run-server.sh` & `scripts/run-server.ps1`).
   - GitHub Actions CI/CD (`.github/workflows/build.yml`) builds and uploads the shaded JAR artifact on every push, runs unit + live Paper/Folia fake-player tests, and publishes a GitHub Release whenever a new version is pushed to `main`.
@@ -37,11 +40,11 @@ The default plugin config preserves the listed items, random count ranges, drop 
 
 ## Live-test gotcha
 
-On Folia 26.3, the console command `clear <player> <item> 0` replies `Found 1 matching item(s)` no matter how many items are actually there. Don't assert exact counts with it. Assert stack sizes from the fake client's inventory packets instead (`FakePlayerClient.receivedItemsSnapshot()` / `awaitItemMatching`).
+On Folia 26.3, the console command `clear <player> <item> 0` replies `Found 1 matching item(s)` no matter how many items are actually there. Don't assert exact counts with it. The existing echo shard / gold ingot `clear` checks only prove the item is present, not how many there are. Assert stack sizes from the fake client's inventory packets instead (`FakePlayerClient.receivedItemsSnapshot()` / `awaitItemMatching`).
 
 ## Repo hygiene notes
 
-- IDE files (`.idea/`, `*.iml`) are no longer tracked; `.gitignore` excludes them. Keep IntelliJ project config local.
+- IDE files (`.idea/`, `*.iml`) are no longer tracked; `.gitignore` excludes them. Keep IntelliJ project config local. Pulling that change deletes previously tracked `.idea` files from a checkout, so IntelliJ may need a one-time Maven project re-import.
 
 ## Open gameplay follow-ups
 
