@@ -272,6 +272,26 @@ class CustomItemsTest {
     }
 
     @Test
+    fun `pack checks leave no http client threads behind`() {
+        fun clientThreads() = Thread.getAllStackTraces().keys.count { it.isAlive && it.name.startsWith("HttpClient-") }
+        val http = com.sun.net.httpserver.HttpServer.create(java.net.InetSocketAddress("127.0.0.1", 0), 0)
+        http.createContext("/pack.zip") { exchange ->
+            exchange.sendResponseHeaders(200, 3)
+            exchange.responseBody.use { it.write(byteArrayOf(1, 2, 3)) }
+        }
+        http.start()
+        val before = clientThreads()
+        try {
+            repeat(5) { ExternalPackVerifier.verify("http://127.0.0.1:${http.address.port}/pack.zip", "x") }
+        } finally {
+            http.stop(0)
+        }
+        val deadline = System.currentTimeMillis() + 5_000
+        while (clientThreads() > before && System.currentTimeMillis() < deadline) Thread.sleep(50)
+        assertEquals(before, clientThreads(), "pack checks leaked HttpClient threads (would pin the plugin class loader)")
+    }
+
+    @Test
     fun `pack status messages tell the admin what to do`() {
         val plain = PlainTextComponentSerializer.plainText()
         assertEquals(

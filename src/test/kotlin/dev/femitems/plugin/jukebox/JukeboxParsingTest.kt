@@ -89,6 +89,49 @@ class JukeboxParsingTest {
     }
 
     @Test
+    fun `gnbs songs that expand past the note limit are rejected instead of exhausting memory`() {
+        val started = System.nanoTime()
+        val error = assertFailsWith<IOException> {
+            GnbsReader.parse(
+                """
+                Content:
+                  Parts:
+                    a: ['0!0:100;999']
+                    b: ['?a;999']
+                    c: ['?b;999']
+                  Main: ['?c']
+                """.trimIndent(),
+                "bomb",
+                identity,
+            )
+        }
+        assertTrue(error.message!!.contains("more than ${GnbsReader.MAX_NOTES} notes"), error.message)
+        assertTrue(System.nanoTime() - started < 10_000_000_000L, "rejecting the song must be quick")
+    }
+
+    @Test
+    fun `gnbs repeat bombs without notes are rejected instead of running forever`() {
+        val started = System.nanoTime()
+        val error = assertFailsWith<IOException> {
+            GnbsReader.parse(
+                """
+                Content:
+                  Parts:
+                    a: ['1!;9999']
+                    b: ['?a;9999']
+                    c: ['?b;9999']
+                    d: ['?c;9999']
+                  Main: ['?d', '0!0:100']
+                """.trimIndent(),
+                "rows",
+                identity,
+            )
+        }
+        assertTrue(error.message!!.contains("more than ${GnbsReader.MAX_EXPANDED_ROWS} rows"), error.message)
+        assertTrue(System.nanoTime() - started < 10_000_000_000L, "rejecting the song must be quick")
+    }
+
+    @Test
     fun `gnbs delay parser handles milliseconds, ticks, and junk`() {
         assertEquals(250, GnbsReader.parseDelay("250"))
         assertEquals(250, GnbsReader.parseDelay("5t"))

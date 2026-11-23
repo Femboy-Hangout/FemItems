@@ -160,6 +160,14 @@ class FemItemsPlugin : JavaPlugin(), Listener {
                 },
             )
             .then(
+                Commands.literal("stats").executes { context ->
+                    val sizes = (jukebox?.music?.stateSizes() ?: emptyMap()) +
+                        mapOf("custom_items" to customItems.current.count, "recipes" to registeredRecipeKeys.size)
+                    context.source.sender.sendMessage(Messages.stats(sizes))
+                    Command.SINGLE_SUCCESS
+                },
+            )
+            .then(
                 Commands.literal("items").executes { context ->
                     context.source.sender.sendMessage(Messages.customItems(customItems.current.definitions.keys.toList()))
                     Command.SINGLE_SUCCESS

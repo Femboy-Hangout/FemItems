@@ -26,6 +26,8 @@ import kotlin.test.assertTrue
  *   sent before upload or when outdated) and self-host, offered to and downloaded by both players,
  *   crafting with a custom ingredient at a crafting table, wearing custom armour (seen by the other
  *   player), smelting custom ore in a furnace, custom mob drops, and /femitems give permissions
+ * - Leak soak: fresh players repeatedly join, play music, toggle shuffle, change volume and leave; every
+ *   per-player store in /femitems stats must return to its baseline
  * - Jukebox driven purely by player actions: placing the block from its item, GUI clicks (volume, song
  *   browser, pause/resume/stop, admin page, disc eject), /femjukebox map, and survival mining of a playing jukebox
  * - Clean disconnect and zero-error server shutdown
@@ -405,6 +407,7 @@ class LiveServerFakePlayerIT {
 
                     runJukeboxSuite(server, opPlayer, guestPlayer)
                     runCustomItemsSuite(server, opPlayer, guestPlayer)
+                    runSoakTest(server, opPlayer)
                 }
             }
 
@@ -959,5 +962,43 @@ class LiveServerFakePlayerIT {
         op.awaitItemMatching("raw ruby dropped by the tagged zombie", sinceIndex = opItemsBeforeKill) { item ->
             item.dataComponentsPatch?.toString().orEmpty().contains("livetest:raw_ruby")
         }
+    }
+
+    /**
+     * Leak soak: fresh players repeatedly join, use per-player features (music, shuffle, GUI volume) and leave.
+     * Every per-player store reported by `/femitems stats` must return to its baseline afterwards.
+     */
+    private fun runSoakTest(server: LiveServerHarness, op: FakePlayerClient) {
+        val platform = server.platform
+        fun stats(): String {
+            val mark = op.chatCount()
+            op.sendCommand("femitems stats")
+            return op.awaitChatContaining("[FemItems] State:", sinceIndex = mark)
+        }
+        op.sendCommand("femjukebox stop") // op's own playback must not change during the measurement
+        Thread.sleep(1000)
+        val baseline = stats()
+
+        repeat(8) { round ->
+            FakePlayerClient(username = "Soak$round", port = server.port).use { visitor ->
+                visitor.connectAndAwaitSpawn()
+                server.sendConsoleCommand("effect give Soak$round minecraft:resistance infinite 4 true")
+                val chat = visitor.chatCount()
+                val sounds = visitor.soundCount()
+                visitor.sendCommand("femjukebox play livelong")
+                visitor.awaitChatContaining("[FemJukebox] Now playing: Live Long Tune", sinceIndex = chat)
+                visitor.sendCommand("femjukebox shuffle")
+                visitor.awaitChatContaining("[FemJukebox] Shuffle enabled.", sinceIndex = chat)
+                val screens = visitor.openedScreenCount()
+                visitor.sendCommand("femjukebox gui")
+                val gui = visitor.awaitScreenTitleContaining("Custom Jukebox • home", sinceIndex = screens)
+                visitor.clickContainerSlot(gui, 17)
+                visitor.awaitChatContaining("[FemJukebox] Playback volume: 110%", sinceIndex = chat)
+                visitor.awaitSoundContaining("note_block.harp", sinceIndex = sounds) // listener sets are populated
+            } // disconnects while playing, with shuffle on and a custom volume
+        }
+
+        Thread.sleep(2000)
+        assertEquals(baseline, stats(), "[$platform] Per-player state did not return to baseline after 8 join/play/leave cycles")
     }
 }

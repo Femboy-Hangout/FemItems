@@ -28,6 +28,7 @@ All commands require `femitems.reload` (operators by default). `/femi` is an ali
 | `/femitems reload` | Reloads `config.yml`. On success it reports the loaded counts; on failure it reports the line number, and hovering the message shows the exact error. A failed reload leaves the previous config fully active. |
 | `/femitems debug` | Toggles mob-death diagnostics in the console. |
 | `/femitems items` | Lists all custom item IDs. |
+| `/femitems stats` | Shows the sizes of FemItems' internal per-player stores (playbacks, bossbars, volumes, shuffle, listeners) plus custom item and recipe counts; useful to confirm nothing grows over time. |
 | `/femitems pack` | Shows the custom item resource pack status and re-checks the uploaded copy (after uploading a new version). |
 | `/femitems give <player> <namespace:item> [amount]` | Gives a custom item. Requires `femitems.give` (operators by default). |
 
@@ -192,7 +193,7 @@ The jukebox feature (formerly the standalone **FemJukebox** plugin) plays Note B
 | `gnbs-sounds.yml` | Maps custom-instrument sample paths (with or without `.ogg`) to resource-pack sound events. |
 | `resource-pack-discs.yml` | Resource-pack disc tracks (`pack-<id>`), for example the bundled Lucy's Mixtape Pigstep, Ward, Stal, and Relic. Players need the resource pack to hear them. |
 
-New or changed files in `convert/` and `gnbs/` are picked up automatically; `/femjukebox reload` also reloads `config.yml` and the mapping files.
+Songs are limited to 1,000,000 notes and 5,000,000 expanded rows (repeats and nested parts), so a broken or malicious `.gnbs` file is skipped with a warning instead of exhausting server memory. New or changed files in `convert/` and `gnbs/` are picked up automatically; `/femjukebox reload` also reloads `config.yml` and the mapping files.
 
 **Upgrading from the standalone FemJukebox plugin:** remove `FemJukebox.jar`. On first start FemItems copies `plugins/FemJukebox/` into `plugins/FemItems/jukebox/`. Existing Custom Jukebox blocks/items, inserted discs, per-jukebox volumes, and mapped discs keep working (their data keys are unchanged). If both plugins are installed, FemItems leaves its jukebox disabled and logs an error.
 

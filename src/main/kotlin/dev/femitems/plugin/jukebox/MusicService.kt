@@ -103,6 +103,15 @@ class MusicService(
     fun personalVolume(player: UUID): Float = personalVolumes[player] ?: defaultVolume
     fun activePlaybackCount(): Int = playbacks.size
 
+    /** Sizes of every per-player store, for leak checks (`/femitems stats`); all must return to baseline. */
+    fun stateSizes(): Map<String, Int> = linkedMapOf(
+        "playbacks" to playbacks.size,
+        "bossbars" to bossBars.size,
+        "volumes" to personalVolumes.size,
+        "shuffle" to shuffle.size,
+        "listeners" to playbacks.values.sumOf { it.noteAudience.size + it.resourceAudience.size },
+    )
+
     // ---------------------------------------------------------------- commands (any thread → global)
 
     /**

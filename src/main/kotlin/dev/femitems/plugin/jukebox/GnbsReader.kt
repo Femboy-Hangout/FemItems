@@ -20,6 +20,12 @@ import kotlin.math.roundToLong
 object GnbsReader {
     private const val MAX_PART_DEPTH = 16
     private const val MAX_REPEATS = 10_000
+
+    /** Most notes one song may expand to; larger songs are rejected instead of exhausting memory. */
+    const val MAX_NOTES = 1_000_000
+
+    /** Most row repetitions one song may expand (bounds CPU for nested repeats/parts even without notes). */
+    const val MAX_EXPANDED_ROWS = 5_000_000
     private val DIGITS = Regex("[0-9]+")
 
     fun read(file: Path, soundResolver: (String) -> String?): Song {
@@ -72,6 +78,7 @@ object GnbsReader {
     ) {
         val notes = ArrayList<Note>()
         var cursor = 0L
+        private var expandedRows = 0L
 
         fun expand(source: String?, depth: Int) {
             if (depth > MAX_PART_DEPTH || source.isNullOrBlank()) return
@@ -86,6 +93,9 @@ object GnbsReader {
             val delay = parseDelay(if (bang >= 0) row.substring(0, bang) else "0")
             val body = if (bang >= 0) row.substring(bang + 1).trim() else row
             repeat(minOf(repeat, MAX_REPEATS)) {
+                if (++expandedRows > MAX_EXPANDED_ROWS) {
+                    throw IOException("song expands to more than $MAX_EXPANDED_ROWS rows (check repeats and nested parts)")
+                }
                 cursor += delay
                 if (body.isBlank()) return@repeat
                 for (token in body.split('_')) {
@@ -108,6 +118,7 @@ object GnbsReader {
             val instrument = instruments[instrumentId]
             val sound = (if (instrument != null) instrument.sound else fallbackSound(instrumentId))
                 ?.takeIf(String::isNotBlank) ?: return
+            if (notes.size >= MAX_NOTES) throw IOException("song has more than $MAX_NOTES notes")
             val at = cursor.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
             if (stop) {
                 notes += Note(at, -1, 0, 0, sound, stop = true, volume = 0f, pitch = 1f)

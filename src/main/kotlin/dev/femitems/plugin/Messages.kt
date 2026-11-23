@@ -92,6 +92,12 @@ object Messages {
         Placeholder.unparsed("mode", mode),
     )
 
+    /** Internal state sizes, e.g. "playbacks=0 bossbars=1 ..." (used by leak/soak tests). */
+    fun stats(sizes: Map<String, Int>): Component = render(
+        "<color:$MUTED>State:</color> <white><sizes></white>",
+        Placeholder.unparsed("sizes", sizes.entries.joinToString(" ") { "${it.key}=${it.value}" }),
+    )
+
     fun debugToggled(enabled: Boolean): Component = if (enabled) {
         render("<color:$LAVENDER>Mob death debug enabled; check console after killing a mob.</color>")
     } else {

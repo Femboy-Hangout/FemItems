@@ -103,13 +103,27 @@ sealed interface ExternalPackStatus {
 object ExternalPackVerifier {
     const val MAX_BYTES = 100L * 1024 * 1024 // mc-packs.net allows 95 MB
 
-    private val client: HttpClient = HttpClient.newBuilder()
+    /**
+     * A client per check, always closed: a long-lived HttpClient keeps a selector thread running, which would
+     * pin this plugin's class loader in memory after the plugin is unloaded (e.g. reloaded with PlugManX).
+     */
+    private fun newClient(): HttpClient = HttpClient.newBuilder()
         .followRedirects(HttpClient.Redirect.NORMAL) // never follows https -> http downgrades
         .connectTimeout(Duration.ofSeconds(10))
         .build()
 
     fun verify(url: String, expectedSha1: String): ExternalPackStatus {
         if (url.isBlank()) return ExternalPackStatus.NotConfigured
+        val client = newClient()
+        try {
+            return download(client, url, expectedSha1)
+        } finally {
+            client.shutdownNow()
+            client.close()
+        }
+    }
+
+    private fun download(client: HttpClient, url: String, expectedSha1: String): ExternalPackStatus {
         return try {
             val request = HttpRequest.newBuilder(URI.create(url))
                 .timeout(Duration.ofSeconds(30))
