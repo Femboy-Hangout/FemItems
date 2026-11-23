@@ -4,8 +4,11 @@ main: dev.femitems.plugin.FemItemsPlugin
 api-version: '26.3'
 folia-supported: true
 authors: [FemItems]
-description: Reloadable custom mob drops and crafting recipes for Paper and Folia.
+description: Reloadable custom mob drops, crafting recipes, and NBS jukebox music for Paper and Folia.
 permissions:
   femitems.reload:
     description: Allows /femitems (info), /femitems reload, and /femitems debug.
+    default: op
+  femjukebox.admin:
+    description: Allows /femjukebox give, disc, map, reload, and the admin-only Custom discs GUI page.
     default: op

@@ -30,6 +30,9 @@ class PluginDescriptorTest {
         assertFalse(version.contains("\${"), "Version placeholder must be filtered by Maven")
         assertTrue(Regex("""^\d+\.\d+\.\d+.*$""").matches(version), "Version '$version' must follow SemVer")
 
+        assertEquals("op", descriptor.getString("permissions.femitems.reload.default"))
+        assertEquals("op", descriptor.getString("permissions.femjukebox.admin.default"))
+
         val mainClassName = checkNotNull(descriptor.getString("main"))
         val mainClass = Class.forName(mainClassName)
         assertTrue(JavaPlugin::class.java.isAssignableFrom(mainClass))

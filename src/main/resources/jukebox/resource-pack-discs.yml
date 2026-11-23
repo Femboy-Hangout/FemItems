@@ -1,0 +1,23 @@
+# Resource-pack sound events from Lucy's Mixtape.
+# Players must have the matching resource pack loaded to hear these tracks.
+tracks:
+  lucys-pigstep:
+    title: 'Steve - Steves Lava Chicken Bemax Hyper Techno Dance Remix'
+    material: MUSIC_DISC_PIGSTEP
+    sound-event: 'minecraft:music_disc.pigstep'
+    duration-seconds: 142.666304
+  lucys-ward:
+    title: 'smokedope2016 - 2016LYFE'
+    material: MUSIC_DISC_WARD
+    sound-event: 'minecraft:music_disc.ward'
+    duration-seconds: 235.081723
+  lucys-stal:
+    title: 'ROY BEE - Kiss Me Again (Nightcore Official Mix)'
+    material: MUSIC_DISC_STAL
+    sound-event: 'minecraft:music_disc.stal'
+    duration-seconds: 137.546667
+  lucys-relic:
+    title: 'All The Things She Said'
+    material: MUSIC_DISC_RELIC
+    sound-event: 'minecraft:music_disc.relic'
+    duration-seconds: 223.912925

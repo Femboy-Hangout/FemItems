@@ -5,9 +5,9 @@
 
     <groupId>dev.femitems</groupId>
     <artifactId>femitems</artifactId>
-    <version>2.0.4</version>
+    <version>2.1.1</version>
     <name>FemItems</name>
-    <description>Paper and Folia plugin for reloadable custom mob drops and crafting recipes.</description>
+    <description>Paper and Folia plugin for reloadable custom mob drops, crafting recipes, and NBS jukebox music.</description>
 
     <properties>
         <maven.compiler.release>25</maven.compiler.release>

@@ -2,6 +2,8 @@ package dev.femitems.plugin
 
 import com.mojang.brigadier.Command
 import com.mojang.brigadier.tree.LiteralCommandNode
+import dev.femitems.plugin.jukebox.JukeboxCommands
+import dev.femitems.plugin.jukebox.JukeboxFeature
 import io.papermc.paper.ServerBuildInfo
 import io.papermc.paper.command.brigadier.CommandSourceStack
 import io.papermc.paper.command.brigadier.Commands
@@ -50,25 +52,49 @@ class FemItemsPlugin : JavaPlugin(), Listener {
 
     private val reloadInProgress = AtomicBoolean(false)
 
+    /** NBS music & Custom Jukebox feature (formerly the standalone FemJukebox plugin). */
+    private var jukebox: JukeboxFeature? = null
+
     override fun onEnable() {
         saveDefaultConfig()
         server.pluginManager.registerEvents(this, this)
-        registerCommands()
 
         val platform = if (isFolia()) "Folia" else "Paper"
         logger.info("Initializing FemItems ${pluginMeta.version} on $platform.")
 
         loadAndApplyOnStartup()
+        enableJukebox()
+        registerCommands()
     }
 
     override fun onDisable() {
+        jukebox?.disable()
+        jukebox = null
         removeRegisteredRecipes()
     }
 
+    private fun enableJukebox() {
+        if (server.pluginManager.getPlugin("FemJukebox") != null) {
+            logger.severe(
+                "The standalone FemJukebox plugin is installed, but its features are now part of FemItems. " +
+                    "Remove FemJukebox's JAR and restart; FemItems' jukebox stays disabled until then.",
+            )
+            return
+        }
+        jukebox = try {
+            JukeboxFeature(this).also(JukeboxFeature::enable)
+        } catch (exception: Exception) {
+            logger.log(Level.SEVERE, "Could not enable the jukebox feature", exception)
+            null
+        }
+    }
+
     private fun registerCommands() {
+        val jukeboxCommands = jukebox?.let { JukeboxCommands(this, it) }
         lifecycleManager.registerEventHandler(LifecycleEvents.COMMANDS) { event ->
             event.registrar().register(buildRootCommand("femitems"))
             event.registrar().register(buildRootCommand("femi"))
+            jukeboxCommands?.let { event.registrar().register(it.build(), "Play NBS music and manage Custom Jukeboxes") }
         }
     }
 

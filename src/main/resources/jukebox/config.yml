@@ -1,0 +1,14 @@
+# FemItems jukebox settings (formerly the standalone FemJukebox plugin).
+# Reload with /femjukebox reload.
+jukebox:
+  # Show a "now playing" bossbar to the player who started a song.
+  bossbar: true
+  # PINK, BLUE, RED, GREEN, YELLOW, PURPLE or WHITE.
+  bossbar-color: PURPLE
+  # Players within this many blocks of a jukebox (or of the player playing a song) hear it.
+  radius: 32
+playback:
+  # Starting volume for new jukeboxes and personal playback (0.0 - 2.0).
+  default-volume: 1.0
+  # Server ticks between playback clock steps (1 = smoothest).
+  tick-interval: 1

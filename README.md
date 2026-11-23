@@ -1,6 +1,6 @@
 # FemItems
 
-A native **Paper & Folia** plugin for **Minecraft 26.3** written in **Kotlin** targeting **Java 25**. It adds configurable, reloadable custom mob drops and shaped or shapeless crafting recipes, and can be reloaded live with `/femitems reload` (or `/femi reload`).
+A native **Paper & Folia** plugin for **Minecraft 26.3** written in **Kotlin** targeting **Java 25**. It adds configurable, reloadable custom mob drops and shaped or shapeless crafting recipes, and can be reloaded live with `/femitems reload` (or `/femi reload`). It also includes the **jukebox** feature (formerly the standalone FemJukebox plugin): `.nbs`/`.gnbs` note-block music, Custom Jukebox blocks, and custom music discs. See [Jukebox and music](#jukebox-and-music).
 
 > **AI Agents:** See [AGENTS.md](AGENTS.md) (also referenced by [CLAUDE.md](CLAUDE.md) and [.github/copilot-instructions.md](.github/copilot-instructions.md)) for mandatory coding standards, Folia thread-safety rules, version bumping, and testing steps.
 
@@ -35,7 +35,7 @@ The project compiles against Paper API 26.3, declares `folia-supported: true` in
 Every push to GitHub runs [`.github/workflows/build.yml`](.github/workflows/build.yml):
 1. Compiles Kotlin (Java 25 bytecode) and executes the JUnit 5 unit test suite.
 2. Packages and uploads `target/femitems-<version>.jar` as a downloadable GitHub Actions workflow artifact.
-3. Boots live **Paper 26.3** and **Folia 26.3** servers with headless MCProtocolLib fake players (`LiveServerFakePlayerIT`) to test permissions, player-initiated `/femitems reload`, custom shaped/shapeless recipes, `/femitems debug`, live custom-named mob kills & drop pickups, and invalid-config reload resilience.
+3. Boots live **Paper 26.3** and **Folia 26.3** servers with headless MCProtocolLib fake players (`LiveServerFakePlayerIT`) to test permissions, player-initiated `/femitems reload`, custom shaped/shapeless recipes, `/femitems debug`, live custom-named mob kills & drop pickups, invalid-config reload resilience, and the jukebox (song reload, playback heard by nearby players, pause/resume/stop, disc insertion/ejection, and the GUI).
 4. On pushes to `main` (or `v*` tags) with a new `<version>` in `pom.xml`, automatically tags `v<version>` and publishes a GitHub Release with the JAR attached.
 
 ## Testing workflow
@@ -56,6 +56,38 @@ Every push to GitHub runs [`.github/workflows/build.yml`](.github/workflows/buil
   ./scripts/run-server.sh --platform paper                                # Linux / macOS
   powershell -ExecutionPolicy Bypass -File .\scripts\run-server.ps1 -Platform paper # Windows
   ```
+
+## Jukebox and music
+
+The jukebox feature (formerly the standalone **FemJukebox** plugin) plays Note Block Studio music and resource-pack disc tracks. Its files live in `plugins/FemItems/jukebox/`:
+
+| File / folder | Purpose |
+| :--- | :--- |
+| `config.yml` | Bossbar on/off and color, hearing `radius` (default 32 blocks), `default-volume`, and `tick-interval`. |
+| `convert/` | Drop `.nbs` files here. They are converted to `.gnbs` in `gnbs/` (the originals are kept). |
+| `gnbs/` | GMusic-format `.gnbs` songs (timed rows, repeats, reusable parts, note stoppers, custom instruments). |
+| `gnbs-sounds.yml` | Maps custom-instrument sample paths (with or without `.ogg`) to resource-pack sound events. |
+| `resource-pack-discs.yml` | Resource-pack disc tracks (`pack-<id>`), for example the bundled Lucy's Mixtape Pigstep, Ward, Stal, and Relic. Players need the resource pack to hear them. |
+
+New or changed files in `convert/` and `gnbs/` are picked up automatically; `/femjukebox reload` also reloads `config.yml` and the mapping files.
+
+**Upgrading from the standalone FemJukebox plugin:** remove `FemJukebox.jar`. On first start FemItems copies `plugins/FemJukebox/` into `plugins/FemItems/jukebox/`. Existing Custom Jukebox blocks/items, inserted discs, per-jukebox volumes, and mapped discs keep working (their data keys are unchanged). If both plugins are installed, FemItems leaves its jukebox disabled and logs an error.
+
+| Command | Permission | What it does |
+| :--- | :--- | :--- |
+| `/femjukebox` | — | Shows the command list. |
+| `/femjukebox gui` | — | Opens playback controls and the song list. |
+| `/femjukebox songs` | — | Lists songs (admins also see resource-pack disc tracks). |
+| `/femjukebox play <song>` | — | Plays a song to you and players within the radius. Disc-only tracks require `femjukebox.admin`. |
+| `/femjukebox pause` / `resume` / `stop` / `shuffle` | — | Controls your playback; shuffle picks a random song when one ends. |
+| `/femjukebox give [player] [amount]` | `femjukebox.admin` | Gives Custom Jukebox items. |
+| `/femjukebox disc <song> [player]` | `femjukebox.admin` | Gives a disc mapped to a song. |
+| `/femjukebox map <song>` | `femjukebox.admin` | Maps the item in your main hand to a song, keeping its look and other data. |
+| `/femjukebox reload` | `femjukebox.admin` | Converts NBS imports and reloads songs and jukebox settings. |
+
+`femjukebox.admin` defaults to operators. Song IDs with spaces must be quoted (`/femjukebox play "My Song"`); tab completion does this for you.
+
+Place a Custom Jukebox item, then right-click it while holding a mapped disc (or a configured resource-pack disc) to insert it and start playback for everyone nearby. Right-clicking a jukebox that already holds a disc opens the GUI instead of replacing the disc. The disc pops out on top of the jukebox when the song ends, playback is stopped, or another song is chosen; the GUI's **Deposited discs** page ejects it into your inventory. The GUI's **Volume -/+** buttons change that jukebox's shared volume (0–200%), saved on the block. Breaking the jukebox stops playback and drops both the jukebox item and its disc. Ordinary jukeboxes keep vanilla behaviour. Resource-pack tracks cannot seek, so resuming one restarts it.
 
 ## Mob drop configuration
 
