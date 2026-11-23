@@ -1,6 +1,6 @@
 # FemItems
 
-A native **Paper & Folia** plugin for **Minecraft 26.3** written in **Kotlin** targeting **Java 25**. It adds **fully custom items with their own textures** (ItemsAdder-style: weapons, tools, armour with worn textures, materials), configurable, reloadable custom mob drops, and shaped, shapeless or smelting recipes, and can be reloaded live with `/femitems reload` (or `/femi reload`). FemItems builds and hosts the resource pack for custom items itself. See [Custom items](#custom-items). It also includes the **jukebox** feature (formerly the standalone FemJukebox plugin): `.nbs`/`.gnbs` note-block music, Custom Jukebox blocks, and custom music discs. See [Jukebox and music](#jukebox-and-music).
+A native **Paper & Folia** plugin for **Minecraft 26.3** written in **Kotlin** targeting **Java 25**. It adds **fully custom items with their own textures** (ItemsAdder-style: weapons, tools, armour with worn textures, materials), configurable, reloadable custom mob drops, and shaped, shapeless or smelting recipes, and can be reloaded live with `/femitems reload` (or `/femi reload`). FemItems builds the resource pack for custom items and verifies the uploaded copy (or hosts it itself). See [Custom items](#custom-items). It also includes the **jukebox** feature (formerly the standalone FemJukebox plugin): `.nbs`/`.gnbs` note-block music, Custom Jukebox blocks, and custom music discs. See [Jukebox and music](#jukebox-and-music).
 
 > **AI Agents:** See [AGENTS.md](AGENTS.md) (also referenced by [CLAUDE.md](CLAUDE.md) and [.github/copilot-instructions.md](.github/copilot-instructions.md)) for mandatory coding standards, Folia thread-safety rules, version bumping, and testing steps.
 
@@ -28,6 +28,7 @@ All commands require `femitems.reload` (operators by default). `/femi` is an ali
 | `/femitems reload` | Reloads `config.yml`. On success it reports the loaded counts; on failure it reports the line number, and hovering the message shows the exact error. A failed reload leaves the previous config fully active. |
 | `/femitems debug` | Toggles mob-death diagnostics in the console. |
 | `/femitems items` | Lists all custom item IDs. |
+| `/femitems pack` | Shows the custom item resource pack status and re-checks the uploaded copy (after uploading a new version). |
 | `/femitems give <player> <namespace:item> [amount]` | Gives a custom item. Requires `femitems.give` (operators by default). |
 
 The project compiles against Paper API 26.3, declares `folia-supported: true` in `paper-plugin.yml`, bundles `kotlin-stdlib` via `maven-shade-plugin`, and registers commands through Paper's Brigadier lifecycle API. Use `/femitems reload` for configuration updates and a server restart for plugin JAR updates.
@@ -61,7 +62,7 @@ Every push to GitHub runs [`.github/workflows/build.yml`](.github/workflows/buil
 
 ## Custom items
 
-FemItems can add fully custom items with their own textures, like ItemsAdder or Nexo. Each custom item is a vanilla base item (for its behaviour: a sword still attacks, a helmet still protects, paper does nothing) with its own model and texture, delivered to players through a resource pack that FemItems generates, hosts and sends automatically.
+FemItems can add fully custom items with their own textures, like ItemsAdder or Nexo. Each custom item is a vanilla base item (for its behaviour: a sword still attacks, a helmet still protects, paper does nothing) with its own model and texture, delivered to players through a resource pack that FemItems generates and sends automatically.
 
 ### Content packs
 
@@ -144,18 +145,36 @@ Custom items never work as their base item in vanilla recipes or furnaces (a pla
 
 ### The resource pack
 
-On `/femitems reload` (and at startup) FemItems builds all content packs into a resource pack, serves it from a small built-in web server, and sends it to every player when they join and whenever it changes. It is sent alongside any other server pack (such as the jukebox discs' pack), not instead of it. Unchanged content keeps the same pack, so players don't re-download it.
+At startup and on every `/femitems reload`, FemItems builds all content packs into one resource pack and writes it to `plugins/FemItems/resourcepack/femitems-items.zip`. Players receive it alongside any other server pack (such as the jukebox discs' pack), not instead of it. Unchanged content produces the same file, so players don't re-download it.
+
+How players get it is set by `resource-pack.mode` in `config.yml`:
+
+**`external` (default; use this behind Velocity/BungeeCord).** You upload the zip to a resource-pack host and FemItems sends players that link. No port is opened and the backend's address is never shown to players.
+
+1. Upload `plugins/FemItems/resourcepack/femitems-items.zip` at [mc-packs.net](https://mc-packs.net), or commit it to a **public** GitHub repository and use its **Raw** link (`https://raw.githubusercontent.com/<user>/<repo>/main/femitems-items.zip`). The GitHub link stays the same when you replace the file, so `url` never needs editing, but GitHub caches raw files for about 5 minutes: if `/femitems pack` still says "outdated" right after a push, wait and run it again. Any host with a direct `https://` download link works.
+2. Put the download link in `config.yml`:
+   ```yaml
+   resource-pack:
+     mode: external
+     url: "https://...the link from mc-packs.net..."
+   ```
+3. Run `/femitems reload` (or `/femitems pack` if only the link changed).
+
+FemItems then downloads the link and checks that it is byte-for-byte the pack it built (SHA-1). Only then is it sent to players, together with that SHA-1, so Minecraft also rejects any file that was swapped or corrupted. When you add or change items, the check fails with "Uploaded resource pack is outdated": upload the new zip, update `url` if the host gave a new link, and run `/femitems pack`. Until then players keep their current textures and are never sent a mismatched pack.
+
+**`self-host`.** FemItems serves the pack from its own web server. Only use this when players connect directly to this server, because the link contains this server's address and the port must be opened:
 
 ```yaml
-resource-pack:          # in config.yml
-  enabled: true
-  port: 8163            # open/forward this TCP port like the game port
-  public-url: ""        # blank = http://<address the player joined with>:8163/
-  required: false       # true = kick players who decline the pack
-  prompt: "&dFemItems custom item textures"
+resource-pack:
+  mode: self-host
+  self-host:
+    port: 8163
+    public-url: ""   # blank = http://<address the player joined with>:8163/
 ```
 
-If players join through a proxy, a hosting panel, or a different address than the web server is reachable on, set `public-url` (for example `http://203.0.113.5:8163` or a domain).
+**`off`.** The pack is built but never sent.
+
+`required: true` disconnects players who decline the pack; `prompt` is the message shown with the download prompt. `/femitems pack` shows the current pack status and re-checks the uploaded link.
 
 ### Converting ItemsAdder packs
 

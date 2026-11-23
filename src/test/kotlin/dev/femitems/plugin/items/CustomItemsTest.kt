@@ -204,28 +204,86 @@ class CustomItemsTest {
     // ------------------------------------------------------------------ settings
 
     @Test
-    fun `pack url uses the address the player joined with unless a public url is set`() {
+    fun `self-host pack url uses the address the player joined with unless a public url is set`() {
         val pack = BuiltResourcePack(byteArrayOf(1, 2, 3))
         val defaults = ResourcePackSettings()
-        assertEquals("http://play.example.com:8163/${pack.sha1}.zip", defaults.urlFor(pack, "play.example.com"))
-        assertEquals("http://localhost:8163/${pack.sha1}.zip", defaults.urlFor(pack, null))
-        assertEquals("http://[::1]:8163/${pack.sha1}.zip", defaults.urlFor(pack, "::1"))
-        val custom = ResourcePackSettings(publicUrl = "https://cdn.example.com/packs/")
-        assertEquals("https://cdn.example.com/packs/${pack.sha1}.zip", custom.urlFor(pack, "ignored"))
+        assertEquals("http://play.example.com:8163/${pack.sha1}.zip", defaults.selfHostUrlFor(pack, "play.example.com"))
+        assertEquals("http://localhost:8163/${pack.sha1}.zip", defaults.selfHostUrlFor(pack, null))
+        assertEquals("http://[::1]:8163/${pack.sha1}.zip", defaults.selfHostUrlFor(pack, "::1"))
+        val custom = ResourcePackSettings(selfHostPublicUrl = "https://cdn.example.com/packs/")
+        assertEquals("https://cdn.example.com/packs/${pack.sha1}.zip", custom.selfHostUrlFor(pack, "ignored"))
     }
 
     @Test
-    fun `resource pack settings parse and validate`() {
-        assertEquals(ResourcePackSettings(), ResourcePackSettings.from(null))
-        val yaml = YamlConfiguration().apply {
-            set("enabled", false)
-            set("port", 9000)
-            set("public-url", "http://pack.example.com")
+    fun `resource pack settings default to external hosting and validate`() {
+        assertEquals(ResourcePackSettings(mode = PackMode.EXTERNAL), ResourcePackSettings.from(null))
+        val external = ResourcePackSettings.from(YamlConfiguration().apply {
+            set("mode", "external")
+            set("url", "https://download.example.net/pack/abc.zip")
             set("required", true)
+        })
+        assertEquals(PackMode.EXTERNAL, external.mode)
+        assertEquals("https://download.example.net/pack/abc.zip", external.url)
+        assertTrue(external.required)
+        val selfHost = ResourcePackSettings.from(YamlConfiguration().apply {
+            set("mode", "self-host")
+            set("self-host.port", 9000)
+            set("self-host.public-url", "http://pack.example.com")
+        })
+        assertEquals(ResourcePackSettings(mode = PackMode.SELF_HOST, selfHostPort = 9000, selfHostPublicUrl = "http://pack.example.com"), selfHost)
+        assertEquals(PackMode.OFF, ResourcePackSettings.from(YamlConfiguration().apply { set("mode", "off") }).mode)
+        assertEquals(PackMode.OFF, ResourcePackSettings.from(YamlConfiguration().apply { set("enabled", false) }).mode)
+        // 2.2.0 configs (enabled/port/public-url at the top level) keep self-hosting.
+        val legacy = ResourcePackSettings.from(YamlConfiguration().apply { set("enabled", true); set("port", 8163) })
+        assertEquals(PackMode.SELF_HOST, legacy.mode)
+        assertFailsWith<IllegalArgumentException> { ResourcePackSettings.from(YamlConfiguration().apply { set("mode", "cloud") }) }
+        assertFailsWith<IllegalArgumentException> { ResourcePackSettings.from(YamlConfiguration().apply { set("url", "ftp://x") }) }
+        assertFailsWith<IllegalArgumentException> { ResourcePackSettings.from(YamlConfiguration().apply { set("self-host.port", 70000) }) }
+    }
+
+    @Test
+    fun `uploaded pack is verified by downloading it and comparing sha1`() {
+        val pack = BuiltResourcePack("current pack".toByteArray())
+        val served = java.util.concurrent.atomic.AtomicReference("current pack".toByteArray())
+        val http = com.sun.net.httpserver.HttpServer.create(java.net.InetSocketAddress("127.0.0.1", 0), 0)
+        http.createContext("/pack.zip") { exchange ->
+            val body = served.get()
+            exchange.sendResponseHeaders(200, body.size.toLong())
+            exchange.responseBody.use { it.write(body) }
         }
-        assertEquals(ResourcePackSettings(false, 9000, "http://pack.example.com", true), ResourcePackSettings.from(yaml))
-        assertFailsWith<IllegalArgumentException> { ResourcePackSettings.from(YamlConfiguration().apply { set("port", 70000) }) }
-        assertFailsWith<IllegalArgumentException> { ResourcePackSettings.from(YamlConfiguration().apply { set("public-url", "ftp://x") }) }
+        http.start()
+        try {
+            val url = "http://127.0.0.1:${http.address.port}/pack.zip"
+            assertEquals(ExternalPackStatus.Verified(url, pack.sha1), ExternalPackVerifier.verify(url, pack.sha1))
+
+            served.set("an older pack".toByteArray())
+            val outdated = ExternalPackVerifier.verify(url, pack.sha1)
+            assertTrue(outdated is ExternalPackStatus.Outdated, "$outdated")
+            assertEquals(BuiltResourcePack("an older pack".toByteArray()).sha1, (outdated as ExternalPackStatus.Outdated).remoteSha1)
+
+            val missing = ExternalPackVerifier.verify("http://127.0.0.1:${http.address.port}/gone.zip", pack.sha1)
+            assertEquals(ExternalPackStatus.Unreachable("http://127.0.0.1:${http.address.port}/gone.zip", "HTTP 404"), missing)
+        } finally {
+            http.stop(0)
+        }
+        val closedPort = java.net.ServerSocket(0).use { it.localPort }
+        assertTrue(ExternalPackVerifier.verify("http://127.0.0.1:$closedPort/pack.zip", pack.sha1) is ExternalPackStatus.Unreachable)
+        assertEquals(ExternalPackStatus.NotConfigured, ExternalPackVerifier.verify("", pack.sha1))
+    }
+
+    @Test
+    fun `pack status messages tell the admin what to do`() {
+        val plain = PlainTextComponentSerializer.plainText()
+        assertEquals(
+            "[FemItems] Resource pack not sent yet. Upload plugins/FemItems/resourcepack/femitems-items.zip to mc-packs.net and put its download link in resource-pack.url, then /femitems pack.",
+            plain.serialize(Messages.packStatus(ExternalPackStatus.NotConfigured, "femitems-items.zip")),
+        )
+        assertEquals(
+            "[FemItems] Resource pack verified; players get it from https://x/p.zip",
+            plain.serialize(Messages.packStatus(ExternalPackStatus.Verified("https://x/p.zip", "ab"), "f.zip")),
+        )
+        assertContains(plain.serialize(Messages.packStatus(ExternalPackStatus.Outdated("u", "ab"), "f.zip")), "Uploaded resource pack is outdated.")
+        assertContains(plain.serialize(Messages.packStatus(ExternalPackStatus.Unreachable("u", "HTTP 404"), "f.zip")), "Could not download the resource pack: HTTP 404")
     }
 
     // ------------------------------------------------------------------ recipes and drops using custom items

@@ -1,5 +1,6 @@
 package dev.femitems.plugin.items
 
+import dev.femitems.plugin.Messages
 import io.papermc.paper.registry.RegistryAccess
 import io.papermc.paper.registry.RegistryKey
 import net.kyori.adventure.resource.ResourcePackInfo
@@ -25,6 +26,7 @@ import org.bukkit.inventory.meta.EnchantmentStorageMeta
 import org.bukkit.persistence.PersistentDataType
 import org.bukkit.plugin.java.JavaPlugin
 import java.net.URI
+import java.nio.file.Files
 import java.nio.file.Path
 import java.util.UUID
 
@@ -69,32 +71,87 @@ class CustomItemService(private val plugin: JavaPlugin) : Listener {
         }
         val templates = definitions.mapValues { (_, definition) -> build(definition) }
         val resourcePack = if (packs.isNotEmpty()) ResourcePackBuilder.build(packs) else null
+        // Always keep the current pack on disk: this is the file to upload for mode: external.
+        Files.createDirectories(packFile.parent)
+        if (resourcePack != null) Files.write(packFile, resourcePack.bytes) else Files.deleteIfExists(packFile)
         return LoadedItems(packs, definitions, templates, resourcePack, settings)
     }
 
-    /** Swaps in [loaded]; starts/stops the pack server and re-sends a changed pack. Global region thread. */
+    /** The built pack, written on every load (upload this file for `mode: external`). */
+    val packFile: Path get() = plugin.dataFolder.toPath().resolve("resourcepack").resolve("femitems-items.zip")
+
+    @Volatile
+    var externalStatus: ExternalPackStatus = ExternalPackStatus.NotConfigured
+        private set
+
+    /** Swaps in [loaded]; starts/stops the self-host server and re-sends a changed pack. Global region thread. */
     fun apply(loaded: LoadedItems) {
         val previous = current
         current = loaded
         val pack = loaded.resourcePack
         packServer.pack = pack
-        if (pack != null && loaded.settings.enabled) {
+        if (pack != null && loaded.settings.mode == PackMode.SELF_HOST) {
             try {
-                packServer.start(loaded.settings.port)
+                packServer.start(loaded.settings.selfHostPort)
             } catch (e: Exception) {
-                plugin.logger.severe("Could not serve the resource pack on port ${loaded.settings.port}: ${e.message}")
+                plugin.logger.severe("Could not serve the resource pack on port ${loaded.settings.selfHostPort}: ${e.message}")
             }
         } else {
             packServer.stop()
         }
         if (pack != null) {
-            plugin.logger.info("Built custom item resource pack (${loaded.count} items, ${pack.size / 1024} KiB, sha1 ${pack.sha1}).")
+            plugin.logger.info("Built custom item resource pack (${loaded.count} items, ${pack.size / 1024} KiB, sha1 ${pack.sha1}) at $packFile.")
         }
-        val changed = pack?.sha1 != previous.resourcePack?.sha1 || loaded.settings != previous.settings
-        if (changed && previous !== LoadedItems.EMPTY) {
-            for (player in plugin.server.onlinePlayers) {
-                player.scheduler.run(plugin, { sendPack(player) }, null)
+        if (loaded.settings.mode == PackMode.EXTERNAL) {
+            // Until checkExternalPack verifies the link for this exact pack, nothing is sent.
+            val verified = externalStatus as? ExternalPackStatus.Verified
+            if (verified == null || verified.sha1 != pack?.sha1 || verified.url != loaded.settings.url) {
+                externalStatus = ExternalPackStatus.Checking
             }
+        } else {
+            externalStatus = ExternalPackStatus.NotConfigured
+            val changed = pack?.sha1 != previous.resourcePack?.sha1 || loaded.settings != previous.settings
+            if (changed && previous !== LoadedItems.EMPTY) sendToOnlinePlayers()
+        }
+    }
+
+    /**
+     * mode: external — downloads the configured link on the AsyncScheduler and compares it with the built pack.
+     * Players only get the link once it matches; [report] receives the outcome (e.g. the reloading admin).
+     */
+    fun checkExternalPack(report: (Component) -> Unit) {
+        val loaded = current
+        val pack = loaded.resourcePack
+        if (loaded.settings.mode != PackMode.EXTERNAL || pack == null) return
+        if (loaded.settings.url.isBlank()) {
+            externalStatus = ExternalPackStatus.NotConfigured
+            plugin.logger.warning("Custom item textures are not sent yet: upload $packFile (e.g. to mc-packs.net) and set resource-pack.url.")
+            report(Messages.packStatus(externalStatus, packFile.fileName.toString()))
+            return
+        }
+        externalStatus = ExternalPackStatus.Checking
+        plugin.server.asyncScheduler.runNow(plugin) { _ ->
+            val status = ExternalPackVerifier.verify(loaded.settings.url, pack.sha1)
+            if (current !== loaded) return@runNow // a newer reload superseded this check
+            val wasVerified = externalStatus is ExternalPackStatus.Verified
+            externalStatus = status
+            when (status) {
+                is ExternalPackStatus.Verified -> plugin.logger.info("Uploaded resource pack verified at ${status.url}.")
+                is ExternalPackStatus.Outdated -> plugin.logger.warning(
+                    "The pack at ${status.url} is outdated (sha1 ${status.remoteSha1}, expected ${pack.sha1}); " +
+                        "upload the new $packFile and update resource-pack.url. Players are not sent the old link.",
+                )
+                is ExternalPackStatus.Unreachable -> plugin.logger.warning("Could not download the pack from ${status.url}: ${status.reason}.")
+                else -> Unit
+            }
+            report(Messages.packStatus(status, packFile.fileName.toString()))
+            if (status is ExternalPackStatus.Verified && !wasVerified) sendToOnlinePlayers()
+        }
+    }
+
+    private fun sendToOnlinePlayers() {
+        for (player in plugin.server.onlinePlayers) {
+            player.scheduler.run(plugin, { sendPack(player) }, null)
         }
     }
 
@@ -112,8 +169,12 @@ class CustomItemService(private val plugin: JavaPlugin) : Listener {
     fun sendPack(player: Player) {
         val loaded = current
         val pack = loaded.resourcePack ?: return
-        if (!loaded.settings.enabled || !packServer.running) return
-        val url = loaded.settings.urlFor(pack, player.virtualHost?.hostString)
+        val url = when (loaded.settings.mode) {
+            PackMode.OFF -> return
+            PackMode.SELF_HOST -> if (packServer.running) loaded.settings.selfHostUrlFor(pack, player.virtualHost?.hostString) else return
+            // Only a link verified to serve exactly this pack is ever sent.
+            PackMode.EXTERNAL -> (externalStatus as? ExternalPackStatus.Verified)?.takeIf { it.sha1 == pack.sha1 }?.url ?: return
+        }
         val info = ResourcePackInfo.resourcePackInfo(PACK_ID, URI.create(url), pack.sha1)
         player.sendResourcePacks(
             ResourcePackRequest.resourcePackRequest()

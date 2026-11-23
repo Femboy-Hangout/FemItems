@@ -22,7 +22,8 @@ import kotlin.test.assertTrue
  * - Jukebox: song reload, permission-gated admin commands, personal playback heard by nearby players
  *   (global region clock -> each listener's EntityScheduler), pause/resume/stop, Custom Jukebox items,
  *   disc insertion into a Custom Jukebox block, automatic disc ejection, and the jukebox GUI
- * - Custom items: content pack -> generated resource pack offered to and downloaded by both players,
+ * - Custom items: content pack -> generated resource pack; mode external (upload verified by SHA-1, nothing
+ *   sent before upload or when outdated) and self-host, offered to and downloaded by both players,
  *   crafting with a custom ingredient at a crafting table, wearing custom armour (seen by the other
  *   player), smelting custom ore in a furnace, custom mob drops, and /femitems give permissions
  * - Jukebox driven purely by player actions: placing the block from its item, GUI clicks (volume, song
@@ -420,6 +421,13 @@ class LiveServerFakePlayerIT {
         assertEquals(expected, reply.contains(".pass"), "Expected block at $position to ${if (expected) "" else "not "}be $block (got $reply)")
     }
 
+    /** Runs an `/execute if|unless ...` check as [player] and returns whether it passed. */
+    private fun conditional(player: FakePlayerClient, command: String): Boolean {
+        val mark = player.chatCount()
+        player.sendCommand(command)
+        return player.awaitChatContaining("commands.execute.conditional", sinceIndex = mark).contains(".pass")
+    }
+
     /** Fails (naming the cause) if any entity's hitbox intersects the selector volume. */
     private fun assertNoEntityIn(player: FakePlayerClient, volume: String) {
         val mark = player.chatCount()
@@ -585,9 +593,19 @@ class LiveServerFakePlayerIT {
         assertBlock(op, "2 -60 2", "minecraft:air", expected = true)
         assertNoEntityIn(op, "x=2,y=-60,z=2,dx=0,dy=0,dz=0") // an entity in the space blocks placement
         assertBlock(op, "2 -61 2", "minecraft:air", expected = false) // solid ground (grass turns to dirt under blocks)
+        assertTrue(conditional(op, "execute if items entity @s weapon.mainhand minecraft:jukebox"), "[$platform] FakeOp is not holding the jukebox before placing")
         op.useItemOnBlock(2, -61, 2) // top face of the ground block -> places at (2, -60, 2)
         Thread.sleep(1000)
-        assertBlock(op, "2 -60 2", "minecraft:jukebox", expected = true)
+        if (!conditional(op, "execute if block 2 -60 2 minecraft:jukebox")) {
+            // Diagnose instead of guessing: what is in hand now, and what occupies the space?
+            val stillHolding = conditional(op, "execute if items entity @s weapon.mainhand minecraft:jukebox")
+            val entityInSpace = conditional(op, "execute if entity @e[x=2,y=-60,z=2,dx=0,dy=0,dz=0]")
+            val blockNow = listOf("air", "jukebox", "dirt", "grass_block").firstOrNull { conditional(op, "execute if block 2 -60 2 minecraft:$it") }
+            throw AssertionError(
+                "[$platform] Jukebox was not placed at 2 -60 2: still holding jukebox=$stillHolding, " +
+                    "entity in space=$entityInSpace, block now=$blockNow, recent chat=${op.chatMessagesSnapshot().takeLast(8)}",
+            )
+        }
 
         // J10. Empty-handed right-click opens the GUI (a vanilla jukebox would not), then drive it by clicks.
         var screens = op.openedScreenCount()
@@ -736,8 +754,20 @@ class LiveServerFakePlayerIT {
         }
         writePng(pack.resolve("textures/armor/ruby_layer_1.png"), 64, 32, 0xC0102A)
         writePng(pack.resolve("textures/armor/ruby_layer_2.png"), 64, 32, 0xC0102A)
-        val packPort = java.net.ServerSocket(0).use { it.localPort }
-        Files.writeString(
+        // A stand-in for mc-packs.net: serves whatever zip was last "uploaded" (404 until then).
+        val uploaded = java.util.concurrent.atomic.AtomicReference<ByteArray?>(null)
+        val packHost = com.sun.net.httpserver.HttpServer.create(java.net.InetSocketAddress("127.0.0.1", 0), 0)
+        packHost.createContext("/pack/femitems-items.zip") { exchange ->
+            exchange.use {
+                val body = uploaded.get()
+                if (body == null) exchange.sendResponseHeaders(404, -1)
+                else { exchange.sendResponseHeaders(200, body.size.toLong()); exchange.responseBody.write(body) }
+            }
+        }
+        packHost.start()
+        val hostedUrl = "http://127.0.0.1:${packHost.address.port}/pack/femitems-items.zip"
+        val selfHostPort = java.net.ServerSocket(0).use { it.localPort }
+        fun writeConfig(resourcePack: String) = Files.writeString(
             server.pluginConfigFile(),
             """
             mobs:
@@ -761,21 +791,15 @@ class LiveServerFakePlayerIT {
                 result:
                   item: livetest:ruby
             resource-pack:
-              port: $packPort
-            """.trimIndent() + "\n",
+            """.trimIndent() + "\n" + resourcePack.trimIndent().prependIndent("  ") + "\n",
             StandardCharsets.UTF_8,
         )
-
-        // C2. Reload; both online players are offered the new pack and download it from FemItems' web server.
-        val opPacksBefore = op.offeredPackCount()
-        val guestPacksBefore = guest.offeredPackCount()
-        val opChatBeforeReload = op.chatCount()
-        op.sendCommand("femitems reload")
-        op.awaitChatContaining("[FemItems] Config reloaded. (1 mob rules, 2 recipes, 4 custom items)", sinceIndex = opChatBeforeReload)
-        for ((player, since) in listOf(op to opPacksBefore, guest to guestPacksBefore)) {
+        val builtPack = server.pluginDataDir().resolve("resourcepack").resolve("femitems-items.zip")
+        fun assertOffered(player: FakePlayerClient, since: Int, expectedUrl: String? = null, urlContains: String? = null) {
             val offer = player.awaitPackOffer(sinceIndex = since)
             assertTrue(offer.sha1Matches, "[$platform] ${player.username} downloaded a pack whose SHA-1 does not match: $offer")
-            assertTrue(offer.url.contains(":$packPort/"), "[$platform] Unexpected pack URL ${offer.url}")
+            expectedUrl?.let { assertEquals(it, offer.url, "[$platform] Unexpected pack URL") }
+            urlContains?.let { assertTrue(offer.url.contains(it), "[$platform] Unexpected pack URL ${offer.url}") }
             val entries = java.util.zip.ZipInputStream(java.io.ByteArrayInputStream(offer.bytes!!)).use { zip ->
                 generateSequence { zip.nextEntry }.map { it.name }.toSet()
             }
@@ -791,6 +815,59 @@ class LiveServerFakePlayerIT {
                 assertTrue(entry in entries, "[$platform] Resource pack is missing $entry: $entries")
             }
         }
+
+        try {
+            // C2a. mode: external (the recommended setup behind Velocity). Nothing uploaded yet: no pack is sent,
+            //      and the admin is told what to upload.
+            writeConfig("mode: external\nurl: \"$hostedUrl\"")
+            var opPacks = op.offeredPackCount()
+            var guestPacks = guest.offeredPackCount()
+            val opChatBeforeReload = op.chatCount()
+            op.sendCommand("femitems reload")
+            op.awaitChatContaining("[FemItems] Config reloaded. (1 mob rules, 2 recipes, 4 custom items)", sinceIndex = opChatBeforeReload)
+            op.awaitChatContaining("[FemItems] Could not download the resource pack: HTTP 404", sinceIndex = opChatBeforeReload)
+            Thread.sleep(1500)
+            assertEquals(opPacks, op.offeredPackCount(), "[$platform] A pack was sent before it was uploaded")
+            assertTrue(Files.isRegularFile(builtPack), "[$platform] FemItems did not write $builtPack for uploading")
+
+            // C2b. "Upload" the built zip; /femitems pack verifies the link and both players download it from there.
+            uploaded.set(Files.readAllBytes(builtPack))
+            val opChatBeforeCheck = op.chatCount()
+            op.sendCommand("femitems pack")
+            op.awaitChatContaining("[FemItems] Resource pack verified; players get it from $hostedUrl", sinceIndex = opChatBeforeCheck)
+            assertOffered(op, opPacks, expectedUrl = hostedUrl)
+            assertOffered(guest, guestPacks, expectedUrl = hostedUrl)
+
+            // C2c. Changing an item makes the upload outdated: FemItems says so and does not send the old zip.
+            val oldUpload = uploaded.get()
+            writePng(pack.resolve("textures/item/ruby.png"), 16, 16, 0xE0405A)
+            opPacks = op.offeredPackCount()
+            val opChatBeforeChange = op.chatCount()
+            op.sendCommand("femitems reload")
+            op.awaitChatContaining("[FemItems] Uploaded resource pack is outdated.", sinceIndex = opChatBeforeChange)
+            Thread.sleep(1500)
+            assertEquals(opPacks, op.offeredPackCount(), "[$platform] An outdated upload was sent to players")
+            assertTrue(!Files.readAllBytes(builtPack).contentEquals(oldUpload), "[$platform] The rebuilt pack did not change")
+
+            // C2d. Re-upload: players get the new pack.
+            uploaded.set(Files.readAllBytes(builtPack))
+            guestPacks = guest.offeredPackCount()
+            val opChatBeforeRecheck = op.chatCount()
+            op.sendCommand("femitems pack")
+            op.awaitChatContaining("[FemItems] Resource pack verified", sinceIndex = opChatBeforeRecheck)
+            assertOffered(op, opPacks, expectedUrl = hostedUrl)
+            assertOffered(guest, guestPacks, expectedUrl = hostedUrl)
+        } finally {
+            packHost.stop(0)
+        }
+
+        // C2e. mode: self-host still works for servers players join directly.
+        writeConfig("mode: self-host\nself-host:\n  port: $selfHostPort")
+        val opPacksSelf = op.offeredPackCount()
+        val opChatBeforeSelf = op.chatCount()
+        op.sendCommand("femitems reload")
+        op.awaitChatContaining("[FemItems] Config reloaded.", sinceIndex = opChatBeforeSelf)
+        assertOffered(op, opPacksSelf, urlContains = ":$selfHostPort/")
 
         // C3. Listing and giving custom items; a non-op cannot give.
         val opChatBeforeList = op.chatCount()

@@ -145,6 +145,21 @@ class FemItemsPlugin : JavaPlugin(), Listener {
                 },
             )
             .then(
+                Commands.literal("pack").executes { context ->
+                    // Re-check the uploaded pack (e.g. right after uploading a new version).
+                    val sender = context.source.sender
+                    if (customItems.current.resourcePack == null) {
+                        sender.sendMessage(Messages.customItems(emptyList()))
+                    } else if (customItems.current.settings.mode == dev.femitems.plugin.items.PackMode.EXTERNAL) {
+                        sender.sendMessage(Messages.packStatus(dev.femitems.plugin.items.ExternalPackStatus.Checking, ""))
+                        customItems.checkExternalPack(sender::sendMessage)
+                    } else {
+                        sender.sendMessage(Messages.packMode(customItems.current.settings.mode.configName))
+                    }
+                    Command.SINGLE_SUCCESS
+                },
+            )
+            .then(
                 Commands.literal("items").executes { context ->
                     context.source.sender.sendMessage(Messages.customItems(customItems.current.definitions.keys.toList()))
                     Command.SINGLE_SUCCESS
@@ -223,6 +238,7 @@ class FemItemsPlugin : JavaPlugin(), Listener {
         val result = loadContent()
         if (result is LoadResult.Loaded) {
             applyContent(result.content)
+            customItems.checkExternalPack { } // outcome is logged; runs on the AsyncScheduler
         }
     }
 
@@ -259,6 +275,7 @@ class FemItemsPlugin : JavaPlugin(), Listener {
                 try {
                     applyContent(content)
                     sender.sendMessage(Messages.reloaded(content.mobRules.size, content.definitionCount, content.items.count))
+                    customItems.checkExternalPack(sender::sendMessage)
                 } catch (exception: Exception) {
                     logger.log(Level.SEVERE, "Failed to apply reloaded config", exception)
                     sender.sendMessage(Messages.configError(null, ConfigParser.conciseError(exception)))

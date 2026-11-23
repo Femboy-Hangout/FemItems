@@ -1,5 +1,6 @@
 package dev.femitems.plugin
 
+import dev.femitems.plugin.items.ExternalPackStatus
 import net.kyori.adventure.text.Component
 import net.kyori.adventure.text.event.ClickEvent
 import net.kyori.adventure.text.event.HoverEvent
@@ -64,6 +65,32 @@ object Messages {
             Placeholder.unparsed("text", text),
         ).hoverEvent(HoverEvent.showText(Component.text(detail)))
     }
+
+    /** Where the custom item resource pack stands (mode: external). */
+    fun packStatus(status: ExternalPackStatus, fileName: String): Component = when (status) {
+        is ExternalPackStatus.Verified -> render(
+            "<color:$SUCCESS>Resource pack verified; players get it from</color> <white><url></white>",
+            Placeholder.unparsed("url", status.url),
+        )
+        is ExternalPackStatus.Outdated -> render(
+            "<color:$ERROR>Uploaded resource pack is outdated.</color> <color:$MUTED>Upload resourcepack/<file> again and update resource-pack.url, then /femitems pack.</color>",
+            Placeholder.unparsed("file", fileName),
+        ).hoverEvent(HoverEvent.showText(Component.text("Link: ${status.url}\nIts SHA-1: ${status.remoteSha1}")))
+        is ExternalPackStatus.Unreachable -> render(
+            "<color:$ERROR>Could not download the resource pack:</color> <color:$MUTED><reason></color>",
+            Placeholder.unparsed("reason", status.reason),
+        ).hoverEvent(HoverEvent.showText(Component.text("Link: ${status.url}")))
+        ExternalPackStatus.NotConfigured -> render(
+            "<color:$LAVENDER>Resource pack not sent yet.</color> <color:$MUTED>Upload plugins/FemItems/resourcepack/<file> to mc-packs.net and put its download link in resource-pack.url, then /femitems pack.</color>",
+            Placeholder.unparsed("file", fileName),
+        )
+        ExternalPackStatus.Checking -> render("<color:$MUTED>Checking the uploaded resource pack...</color>")
+    }
+
+    fun packMode(mode: String): Component = render(
+        "<color:$MUTED>Resource pack mode is</color> <white><mode></white><color:$MUTED>; nothing to verify.</color>",
+        Placeholder.unparsed("mode", mode),
+    )
 
     fun debugToggled(enabled: Boolean): Component = if (enabled) {
         render("<color:$LAVENDER>Mob death debug enabled; check console after killing a mob.</color>")

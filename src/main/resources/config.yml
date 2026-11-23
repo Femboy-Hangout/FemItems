@@ -207,13 +207,20 @@ recipes:
 # Recipes, smelting and mob drops can use them with "item: <namespace>:<id>" (results/drops) or
 # "<namespace>:<id>" (ingredients). FemItems builds a resource pack with their textures and sends it to players.
 resource-pack:
-  # Build, host and send the custom item pack (only active once a content pack exists).
-  enabled: true
-  # TCP port of FemItems' built-in pack web server. Open/forward it like the game port.
-  port: 8163
-  # Leave blank to use http://<address the player joined with>:<port>/. Set this when players must
-  # download from a different address, e.g. "http://pack.example.com:8163" or a reverse proxy URL.
-  public-url: ""
+  # external  - upload plugins/FemItems/resourcepack/femitems-items.zip to a pack host such as
+  #             https://mc-packs.net and paste its download link below. Recommended behind a proxy (Velocity):
+  #             no port is opened and the backend's address stays private. FemItems downloads the link on
+  #             startup, /femitems reload and /femitems pack, and only sends it to players if it is exactly
+  #             the current pack; when you add or change items it tells you to upload the new zip.
+  # self-host - FemItems serves the pack from its own web server (self-host.port). Only for servers that
+  #             players join directly; it exposes this server's address and needs the port opened.
+  # off       - build the pack but never send it.
+  mode: external
+  url: ""
   # true = players who decline the pack are disconnected.
   required: false
   prompt: "&dFemItems custom item textures"
+  self-host:
+    port: 8163
+    # Blank = http://<address the player joined with>:<port>/
+    public-url: ""
