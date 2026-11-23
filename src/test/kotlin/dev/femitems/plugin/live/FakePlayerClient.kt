@@ -9,6 +9,11 @@ import org.geysermc.mcprotocollib.network.factory.ClientNetworkSessionFactory
 import org.geysermc.mcprotocollib.network.packet.Packet
 import org.geysermc.mcprotocollib.network.session.ClientNetworkSession
 import org.geysermc.mcprotocollib.protocol.MinecraftProtocol
+import org.geysermc.mcprotocollib.protocol.data.game.ResourcePackStatus
+import org.geysermc.mcprotocollib.protocol.packet.common.clientbound.ClientboundResourcePackPushPacket
+import org.geysermc.mcprotocollib.protocol.packet.common.serverbound.ServerboundResourcePackPacket
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.ClientboundSetEquipmentPacket
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundUseItemPacket
 import org.geysermc.mcprotocollib.protocol.data.game.entity.`object`.Direction
 import org.geysermc.mcprotocollib.protocol.data.game.entity.player.Hand
 import org.geysermc.mcprotocollib.protocol.data.game.entity.player.HandPreference
@@ -38,6 +43,11 @@ import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.inventory.S
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.inventory.ServerboundContainerClosePacket
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundPlayerActionPacket
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundUseItemOnPacket
+import java.net.URI
+import java.net.http.HttpClient
+import java.net.http.HttpRequest
+import java.net.http.HttpResponse
+import java.security.MessageDigest
 import java.time.Duration
 import java.time.Instant
 import java.util.ArrayDeque
@@ -47,6 +57,15 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
+
+/**
+ * A resource pack the server offered. Like a real client, the fake player downloads it, checks the SHA-1,
+ * and reports ACCEPTED -> DOWNLOADED -> SUCCESSFULLY_LOADED (or FAILED_DOWNLOAD) back to the server.
+ */
+data class OfferedPack(val url: String, val hash: String, val required: Boolean, val bytes: ByteArray?, val sha1Matches: Boolean)
+
+/** An item seen in a container slot ([containerId] 0 is the player's own inventory; armour head is slot 5). */
+data class SlotUpdate(val containerId: Int, val slot: Int, val item: ItemStack?)
 
 /** A sound the client was told to play. */
 data class CapturedSound(val name: String, val volume: Float, val pitch: Float)
@@ -112,6 +131,9 @@ class FakePlayerClient(
     private val stoppedSounds = BoundedEventBuffer<String>(MAX_CAPTURED_EVENTS)
     private val openedScreens = BoundedEventBuffer<OpenedScreen>(MAX_CAPTURED_EVENTS)
     private val containerStateIds = ConcurrentHashMap<Int, Int>()
+    private val offeredPacks = BoundedEventBuffer<OfferedPack>(MAX_CAPTURED_EVENTS)
+    private val slotUpdates = BoundedEventBuffer<SlotUpdate>(MAX_CAPTURED_EVENTS)
+    private val seenEquipment = BoundedEventBuffer<String>(MAX_CAPTURED_EVENTS)
     private val blockSequence = AtomicInteger(0)
 
     private var session: ClientNetworkSession? = null
@@ -180,8 +202,16 @@ class FakePlayerClient(
                         OpenedScreen(packet.containerId, PlainTextComponentSerializer.plainText().serialize(packet.title)),
                     )
 
+                    is ClientboundResourcePackPushPacket -> handlePackOffer(session, packet)
+
+                    // What this client sees other entities wearing/holding (rendered from these items).
+                    is ClientboundSetEquipmentPacket -> for (equipment in packet.equipment) {
+                        equipment.item?.let { seenEquipment.add("${equipment.slot}=${it.dataComponentsPatch}") }
+                    }
+
                     is ClientboundContainerSetSlotPacket -> {
                         containerStateIds[packet.containerId] = packet.stateId
+                        slotUpdates.add(SlotUpdate(packet.containerId, packet.slot, packet.item))
                         val item = packet.item
                         if (item != null && item.amount > 0) {
                             receivedItems.add(item)
@@ -190,6 +220,10 @@ class FakePlayerClient(
 
                     is ClientboundContainerSetContentPacket -> {
                         containerStateIds[packet.containerId] = packet.stateId
+                        // A full resync (e.g. after a click the server corrected) carries every slot at once.
+                        packet.items.forEachIndexed { index, item ->
+                            if (item != null && item.amount > 0) slotUpdates.add(SlotUpdate(packet.containerId, index, item))
+                        }
                         for (item in packet.items) {
                             if (item != null && item.amount > 0) {
                                 receivedItems.add(item)
@@ -274,6 +308,49 @@ class FakePlayerClient(
             ),
         )
     }
+
+    private fun handlePackOffer(session: Session, packet: ClientboundResourcePackPushPacket) {
+        Thread({
+            session.send(ServerboundResourcePackPacket(packet.id, ResourcePackStatus.ACCEPTED))
+            val bytes = runCatching {
+                HttpClient.newHttpClient().send(
+                    HttpRequest.newBuilder(URI.create(packet.url)).timeout(Duration.ofSeconds(10)).GET().build(),
+                    HttpResponse.BodyHandlers.ofByteArray(),
+                ).takeIf { it.statusCode() == 200 }?.body()
+            }.getOrNull()
+            val sha1 = bytes?.let { MessageDigest.getInstance("SHA-1").digest(it).joinToString("") { b -> "%02x".format(b) } }
+            val matches = sha1 != null && sha1.equals(packet.hash, ignoreCase = true)
+            if (matches) {
+                session.send(ServerboundResourcePackPacket(packet.id, ResourcePackStatus.DOWNLOADED))
+                session.send(ServerboundResourcePackPacket(packet.id, ResourcePackStatus.SUCCESSFULLY_LOADED))
+            } else {
+                session.send(ServerboundResourcePackPacket(packet.id, ResourcePackStatus.FAILED_DOWNLOAD))
+            }
+            offeredPacks.add(OfferedPack(packet.url, packet.hash, packet.isRequired, bytes, matches))
+        }, "$username-pack-download").apply { isDaemon = true }.start()
+    }
+
+    /** Right-clicks with the held item in the air (e.g. equips armour, like a real client). */
+    fun useHeldItem() {
+        send(ServerboundUseItemPacket(Hand.MAIN_HAND, blockSequence.incrementAndGet(), 0f, 0f))
+    }
+
+    fun offeredPackCount(): Int = offeredPacks.count()
+
+    /** Waits until the client has handled a resource pack offer (downloaded and hash-checked it). */
+    fun awaitPackOffer(sinceIndex: Int = 0, timeout: Duration = Duration.ofSeconds(20)): OfferedPack =
+        awaitEvent(offeredPacks, "resource pack offer", sinceIndex, timeout) { true }
+
+    fun slotUpdateCount(): Int = slotUpdates.count()
+
+    fun awaitSlotUpdate(description: String, sinceIndex: Int = 0, timeout: Duration = Duration.ofSeconds(15), predicate: (SlotUpdate) -> Boolean): SlotUpdate =
+        awaitEvent(slotUpdates, description, sinceIndex, timeout, predicate)
+
+    fun seenEquipmentCount(): Int = seenEquipment.count()
+
+    /** Waits until this client sees an entity wearing/holding an item whose components contain [substring]. */
+    fun awaitSeenEquipmentContaining(substring: String, sinceIndex: Int = 0, timeout: Duration = Duration.ofSeconds(15)): String =
+        awaitEvent(seenEquipment, "equipment containing '$substring'", sinceIndex, timeout) { it.contains(substring) }
 
     /** Closes a container screen, as pressing Esc does. */
     fun closeContainer(screen: OpenedScreen) {
@@ -427,6 +504,9 @@ class FakePlayerClient(
         stoppedSounds.clear()
         openedScreens.clear()
         containerStateIds.clear()
+        offeredPacks.clear()
+        slotUpdates.clear()
+        seenEquipment.clear()
     }
 
     private companion object {

@@ -22,19 +22,42 @@ object ConfigParser {
     private val ENCHANT_ERROR_PATTERN: Pattern =
         Pattern.compile("recipes\\.([A-Za-z0-9_-]+)\\.result\\.enchants\\.([^\\s]+)")
     private val PATH_ERROR_PATTERN: Pattern =
-        Pattern.compile("(?:mobs|recipes)\\.([A-Za-z0-9_-]+)(?:\\.([A-Za-z0-9_-]+))?")
+        Pattern.compile("(?:mobs|recipes|items|equipment)\\.(?!yml\\b)([A-Za-z0-9_-]+)(?:\\.([A-Za-z0-9_-]+))?")
 
+    /**
+     * @param customItems custom items (by `namespace:key`) that recipes and drops may reference, mapped to
+     *   their base material; their stack limits come from [customStackSize].
+     */
     fun parse(
         config: YamlConfiguration,
         maxStackSizeProvider: (Material) -> Int = { it.maxStackSize },
         enchantmentValidator: (NamespacedKey) -> Boolean = ::defaultEnchantmentExists,
+        customItems: Map<String, Material> = emptyMap(),
+        customStackSize: (String) -> Int = { 64 },
     ): ParsedConfig {
-        val mobRules = readMobRules(config)
-        val recipes = readRecipes(config, maxStackSizeProvider, enchantmentValidator)
+        val mobRules = readMobRules(config, customItems)
+        val recipes = readRecipes(config, maxStackSizeProvider, enchantmentValidator, customItems, customStackSize)
         return ParsedConfig(mobRules = mobRules, recipes = recipes)
     }
 
-    fun readMobRules(config: YamlConfiguration): List<MobRule> {
+    /** Resolves a `namespace:key` custom item reference, or null when [name] is a vanilla material name. */
+    private fun customItemId(name: String, customItems: Map<String, Material>, path: String): String? {
+        val normalized = name.trim().lowercase(Locale.ROOT)
+        if (':' !in normalized || normalized.startsWith("minecraft:")) return null
+        if (normalized !in customItems) throw IllegalArgumentException("Unknown custom item in $path: $name")
+        return normalized
+    }
+
+    private fun readIngredient(name: String, customItems: Map<String, Material>, path: String): Ingredient {
+        customItemId(name, customItems, path)?.let { return Ingredient.Custom(it) }
+        val material = Material.matchMaterial(name)
+        if (material == null || isAirMaterial(material)) {
+            throw IllegalArgumentException("Unknown ingredient in $path: $name")
+        }
+        return Ingredient.Vanilla(material)
+    }
+
+    fun readMobRules(config: YamlConfiguration, customItems: Map<String, Material> = emptyMap()): List<MobRule> {
         val mobs = config.getConfigurationSection("mobs") ?: return emptyList()
         val rules = ArrayList<MobRule>()
 
@@ -57,10 +80,16 @@ object ConfigParser {
 
             val drops = ArrayList<DropRule>()
             for (raw in section.getMapList("drops")) {
-                val materialName = raw["material"].toString()
-                val material = Material.matchMaterial(materialName)
-                if (material == null || isAirMaterial(material)) {
-                    throw IllegalArgumentException("Unknown drop material in mobs.$id: $materialName")
+                val customItem = raw["item"]?.toString()?.let { itemName ->
+                    customItemId(itemName, customItems, "mobs.$id.drops")
+                        ?: throw IllegalArgumentException("mobs.$id.drops.item must be a custom item id (namespace:key): $itemName")
+                }
+                val material = if (customItem != null) {
+                    customItems.getValue(customItem)
+                } else {
+                    val materialName = raw["material"].toString()
+                    Material.matchMaterial(materialName)?.takeUnless(::isAirMaterial)
+                        ?: throw IllegalArgumentException("Unknown drop material in mobs.$id: $materialName")
                 }
                 val min = intValue(raw["min"], 1, "mobs.$id.drops.min")
                 val max = intValue(raw["max"], min, "mobs.$id.drops.max")
@@ -79,10 +108,13 @@ object ConfigParser {
                     else -> value.toString().toBooleanStrictOrNull()
                         ?: throw IllegalArgumentException("mobs.$id.drops.random-enchantment must be true or false")
                 }
+                if (randomEnchantment && customItem != null) {
+                    throw IllegalArgumentException("mobs.$id.drops.random-enchantment cannot be used with item")
+                }
                 if (randomEnchantment && material != Material.ENCHANTED_BOOK) {
                     throw IllegalArgumentException("mobs.$id.drops.random-enchantment requires material ENCHANTED_BOOK")
                 }
-                drops.add(DropRule(material, min, max, chance, customName, randomEnchantment))
+                drops.add(DropRule(material, min, max, chance, customName, randomEnchantment, customItem))
             }
 
             rules.add(MobRule(id, type, nameContains, entityTag, drops.toList()))
@@ -95,6 +127,8 @@ object ConfigParser {
         config: YamlConfiguration,
         maxStackSizeProvider: (Material) -> Int = { it.maxStackSize },
         enchantmentValidator: (NamespacedKey) -> Boolean = ::defaultEnchantmentExists,
+        customItems: Map<String, Material> = emptyMap(),
+        customStackSize: (String) -> Int = { 64 },
     ): List<RecipeDefinition> {
         val section = config.getConfigurationSection("recipes") ?: return emptyList()
         val recipes = ArrayList<RecipeDefinition>()
@@ -106,6 +140,8 @@ object ConfigParser {
                 path = "recipes.$id.result",
                 maxStackSizeProvider = maxStackSizeProvider,
                 enchantmentValidator = enchantmentValidator,
+                customItems = customItems,
+                customStackSize = customStackSize,
             )
             val type = recipeSection.getString("type", "shaped").orEmpty().lowercase(Locale.ROOT)
 
@@ -121,17 +157,14 @@ object ConfigParser {
                     }
                     val ingredientsSection = recipeSection.getConfigurationSection("ingredients")
                         ?: throw IllegalArgumentException("recipes.$id.ingredients is required")
-                    val ingredients = LinkedHashMap<Char, Material>()
+                    val ingredients = LinkedHashMap<Char, Ingredient>()
                     for (symbol in ingredientsSection.getKeys(false)) {
                         val materialName = ingredientsSection.getString(symbol, "").orEmpty()
-                        val material = Material.matchMaterial(materialName)
-                        if (material == null || isAirMaterial(material)) {
-                            throw IllegalArgumentException("Unknown ingredient in recipes.$id: $materialName")
-                        }
+                        val ingredient = readIngredient(materialName, customItems, "recipes.$id")
                         if (symbol.length != 1) {
                             throw IllegalArgumentException("Ingredient keys must be one character in recipes.$id")
                         }
-                        ingredients[symbol[0]] = material
+                        ingredients[symbol[0]] = ingredient
                     }
                     for (row in shape) {
                         for (ch in row) {
@@ -161,11 +194,7 @@ object ConfigParser {
                         throw IllegalArgumentException("recipes.$id.ingredients must contain between 1 and 9 materials")
                     }
                     val ingredients = rawIngredients.map { materialName ->
-                        val material = Material.matchMaterial(materialName)
-                        if (material == null || isAirMaterial(material)) {
-                            throw IllegalArgumentException("Unknown ingredient in recipes.$id: $materialName")
-                        }
-                        material
+                        readIngredient(materialName, customItems, "recipes.$id")
                     }
                     recipes.add(
                         ShapelessRecipeDefinition(
@@ -176,7 +205,24 @@ object ConfigParser {
                     )
                 }
 
-                else -> throw IllegalArgumentException("recipes.$id.type must be shaped or shapeless")
+                "smelting" -> {
+                    val ingredientName = recipeSection.getString("ingredient")?.takeIf(String::isNotBlank)
+                        ?: throw IllegalArgumentException("recipes.$id.ingredient is required")
+                    val ingredient = readIngredient(ingredientName, customItems, "recipes.$id")
+                    val machineNames = recipeSection.getStringList("machines").ifEmpty { listOf("furnace") }
+                    val machines = machineNames.map { name ->
+                        CookingMachine.entries.firstOrNull { it.configName == name.trim().lowercase(Locale.ROOT) }
+                            ?: throw IllegalArgumentException("recipes.$id.machines: unknown machine '$name' (furnace, blast_furnace, smoker, campfire)")
+                    }.distinct()
+                    val experience = doubleValue(recipeSection.get("experience"), 0.0, "recipes.$id.experience")
+                    val cookTime = intValue(recipeSection.get("cook-time"), 200, "recipes.$id.cook-time")
+                    if (experience < 0 || cookTime < 1) {
+                        throw IllegalArgumentException("recipes.$id needs experience >= 0 and cook-time >= 1")
+                    }
+                    recipes.add(CookingRecipeDefinition(id, result, ingredient, machines, experience.toFloat(), cookTime))
+                }
+
+                else -> throw IllegalArgumentException("recipes.$id.type must be shaped, shapeless or smelting")
             }
         }
 
@@ -188,9 +234,20 @@ object ConfigParser {
         path: String,
         maxStackSizeProvider: (Material) -> Int = { it.maxStackSize },
         enchantmentValidator: (NamespacedKey) -> Boolean = ::defaultEnchantmentExists,
+        customItems: Map<String, Material> = emptyMap(),
+        customStackSize: (String) -> Int = { 64 },
     ): ItemDefinition {
         if (section == null) {
             throw IllegalArgumentException("$path is required")
+        }
+        section.getString("item")?.let { itemName ->
+            val customItem = customItemId(itemName, customItems, path)
+                ?: throw IllegalArgumentException("$path.item must be a custom item id (namespace:key): $itemName")
+            val amount = section.getInt("amount", 1)
+            if (amount < 1 || amount > customStackSize(customItem)) {
+                throw IllegalArgumentException("$path has an invalid amount for $customItem")
+            }
+            return ItemDefinition(material = customItems.getValue(customItem), amount = amount, customItem = customItem)
         }
         val materialName = section.getString("material", "").orEmpty()
         val material = Material.matchMaterial(materialName)
@@ -290,6 +347,7 @@ object ConfigParser {
                         amount = amount,
                         name = drop.name,
                         randomEnchantment = drop.randomEnchantment,
+                        customItem = drop.customItem,
                     ),
                 )
             }

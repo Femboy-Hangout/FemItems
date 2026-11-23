@@ -128,6 +128,8 @@ class LiveServerHarness(
 
     fun pluginConfigFile(): Path = serverDir.resolve("plugins").resolve("FemItems").resolve("config.yml")
 
+    fun pluginDataDir(): Path = serverDir.resolve("plugins").resolve("FemItems")
+
     fun jukeboxSongsDir(): Path = serverDir.resolve("plugins").resolve("FemItems").resolve("jukebox").resolve("gnbs")
 
     fun sendConsoleCommand(command: String) {

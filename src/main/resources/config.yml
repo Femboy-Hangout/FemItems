@@ -202,3 +202,18 @@ recipes:
       enchants:
         power: 1
         unbreaking: 1
+
+# Custom items (ItemsAdder-style) live in plugins/FemItems/contents/<namespace>/ — see the README.
+# Recipes, smelting and mob drops can use them with "item: <namespace>:<id>" (results/drops) or
+# "<namespace>:<id>" (ingredients). FemItems builds a resource pack with their textures and sends it to players.
+resource-pack:
+  # Build, host and send the custom item pack (only active once a content pack exists).
+  enabled: true
+  # TCP port of FemItems' built-in pack web server. Open/forward it like the game port.
+  port: 8163
+  # Leave blank to use http://<address the player joined with>:<port>/. Set this when players must
+  # download from a different address, e.g. "http://pack.example.com:8163" or a reverse proxy URL.
+  public-url: ""
+  # true = players who decline the pack are disconnected.
+  required: false
+  prompt: "&dFemItems custom item textures"

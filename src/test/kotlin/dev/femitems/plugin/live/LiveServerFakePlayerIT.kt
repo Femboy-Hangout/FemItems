@@ -22,6 +22,9 @@ import kotlin.test.assertTrue
  * - Jukebox: song reload, permission-gated admin commands, personal playback heard by nearby players
  *   (global region clock -> each listener's EntityScheduler), pause/resume/stop, Custom Jukebox items,
  *   disc insertion into a Custom Jukebox block, automatic disc ejection, and the jukebox GUI
+ * - Custom items: content pack -> generated resource pack offered to and downloaded by both players,
+ *   crafting with a custom ingredient at a crafting table, wearing custom armour (seen by the other
+ *   player), smelting custom ore in a furnace, custom mob drops, and /femitems give permissions
  * - Jukebox driven purely by player actions: placing the block from its item, GUI clicks (volume, song
  *   browser, pause/resume/stop, admin page, disc eject), /femjukebox map, and survival mining of a playing jukebox
  * - Clean disconnect and zero-error server shutdown
@@ -275,6 +278,11 @@ class LiveServerFakePlayerIT {
                         fromOffset = logBeforeMobKill,
                     )
 
+                    // Drops scatter on death and may land outside pickup range (seen on CI); bring them to the
+                    // player instead of depending on item physics.
+                    Thread.sleep(500)
+                    opPlayer.sendCommand("tp @e[type=minecraft:item,distance=..8] @s")
+
                     // Verify FakeOp actually receives the colorized Champion's Trophy and 2x gold drop via Minecraft protocol
                     opPlayer.awaitItemMatching(
                         description = "Champion's Trophy colorized custom-named item",
@@ -395,6 +403,7 @@ class LiveServerFakePlayerIT {
                     server.awaitLog(Regex("""Unlocked 1 recipe\(s\) for FakeOp"""), fromOffset = logBeforeGive)
 
                     runJukeboxSuite(server, opPlayer, guestPlayer)
+                    runCustomItemsSuite(server, opPlayer, guestPlayer)
                 }
             }
 
@@ -673,5 +682,205 @@ class LiveServerFakePlayerIT {
         }
         op.assertNoChatContaining("Finished: Live Long Tune", sinceIndex = opChatBeforeBreak)
         server.sendConsoleCommand("effect clear FakeOp minecraft:haste")
+    }
+
+    /** Writes a real PNG (solid colour) so the generated resource pack contains valid textures. */
+    private fun writePng(file: Path, width: Int, height: Int, rgb: Int) {
+        Files.createDirectories(file.parent)
+        val image = java.awt.image.BufferedImage(width, height, java.awt.image.BufferedImage.TYPE_INT_ARGB)
+        for (x in 0 until width) for (y in 0 until height) image.setRGB(x, y, (0xFF shl 24) or rgb)
+        javax.imageio.ImageIO.write(image, "png", file.toFile())
+    }
+
+    private fun runCustomItemsSuite(server: LiveServerHarness, op: FakePlayerClient, guest: FakePlayerClient) {
+        val platform = server.platform
+
+        // C1. A content pack (like the Platinum Set template) plus recipes, smelting and a drop that use it.
+        val pack = server.pluginDataDir().resolve("contents").resolve("livetest")
+        Files.createDirectories(pack)
+        Files.writeString(
+            pack.resolve("items.yml"),
+            """
+            equipment:
+              ruby:
+                layer-1: armor/ruby_layer_1
+                layer-2: armor/ruby_layer_2
+            items:
+              ruby:
+                name: "&cRuby"
+                material: PAPER
+                texture: item/ruby
+              raw_ruby:
+                name: "Raw Ruby"
+                material: PAPER
+                texture: item/raw_ruby
+              ruby_sword:
+                name: "&cRuby Sword"
+                material: DIAMOND_SWORD
+                texture: item/ruby_sword
+                max-durability: 1800
+              ruby_helmet:
+                name: "&cRuby Helmet"
+                material: DIAMOND_HELMET
+                texture: item/ruby_helmet
+                max-durability: 468
+                equipment: ruby
+                attributes:
+                  armor: 3
+                  armor_toughness: 3
+            """.trimIndent() + "\n",
+            StandardCharsets.UTF_8,
+        )
+        for (texture in listOf("ruby", "raw_ruby", "ruby_sword", "ruby_helmet")) {
+            writePng(pack.resolve("textures/item/$texture.png"), 16, 16, 0xC0102A)
+        }
+        writePng(pack.resolve("textures/armor/ruby_layer_1.png"), 64, 32, 0xC0102A)
+        writePng(pack.resolve("textures/armor/ruby_layer_2.png"), 64, 32, 0xC0102A)
+        val packPort = java.net.ServerSocket(0).use { it.localPort }
+        Files.writeString(
+            server.pluginConfigFile(),
+            """
+            mobs:
+              ruby_golem:
+                entity: ZOMBIE
+                entity-tag: femitems.test_ruby
+                drops:
+                  - { item: livetest:raw_ruby, min: 1, max: 1, chance: 1.0 }
+            recipes:
+              ruby_sword:
+                type: shapeless
+                ingredients: [livetest:ruby]
+                result:
+                  item: livetest:ruby_sword
+              raw_ruby_smelt:
+                type: smelting
+                ingredient: livetest:raw_ruby
+                machines: [furnace]
+                experience: 0.5
+                cook-time: 20
+                result:
+                  item: livetest:ruby
+            resource-pack:
+              port: $packPort
+            """.trimIndent() + "\n",
+            StandardCharsets.UTF_8,
+        )
+
+        // C2. Reload; both online players are offered the new pack and download it from FemItems' web server.
+        val opPacksBefore = op.offeredPackCount()
+        val guestPacksBefore = guest.offeredPackCount()
+        val opChatBeforeReload = op.chatCount()
+        op.sendCommand("femitems reload")
+        op.awaitChatContaining("[FemItems] Config reloaded. (1 mob rules, 2 recipes, 4 custom items)", sinceIndex = opChatBeforeReload)
+        for ((player, since) in listOf(op to opPacksBefore, guest to guestPacksBefore)) {
+            val offer = player.awaitPackOffer(sinceIndex = since)
+            assertTrue(offer.sha1Matches, "[$platform] ${player.username} downloaded a pack whose SHA-1 does not match: $offer")
+            assertTrue(offer.url.contains(":$packPort/"), "[$platform] Unexpected pack URL ${offer.url}")
+            val entries = java.util.zip.ZipInputStream(java.io.ByteArrayInputStream(offer.bytes!!)).use { zip ->
+                generateSequence { zip.nextEntry }.map { it.name }.toSet()
+            }
+            for (entry in listOf(
+                "pack.mcmeta",
+                "assets/livetest/items/ruby_sword.json",
+                "assets/livetest/models/item/ruby_sword.json",
+                "assets/livetest/textures/item/ruby_sword.png",
+                "assets/livetest/equipment/ruby.json",
+                "assets/livetest/textures/entity/equipment/humanoid/ruby.png",
+                "assets/livetest/textures/entity/equipment/humanoid_leggings/ruby.png",
+            )) {
+                assertTrue(entry in entries, "[$platform] Resource pack is missing $entry: $entries")
+            }
+        }
+
+        // C3. Listing and giving custom items; a non-op cannot give.
+        val opChatBeforeList = op.chatCount()
+        op.sendCommand("femitems items")
+        op.awaitChatContaining("[FemItems] Custom items (4): livetest:ruby, livetest:raw_ruby, livetest:ruby_sword, livetest:ruby_helmet", sinceIndex = opChatBeforeList)
+        val guestChatBeforeGive = guest.chatCount()
+        val guestItemsBeforeGive = guest.receivedItemCount()
+        guest.sendCommand("femitems give FakeGuest livetest:ruby_sword")
+        guest.assertNoChatContaining("Gave", sinceIndex = guestChatBeforeGive)
+        assertTrue(
+            guest.receivedItemsSnapshot().drop(guestItemsBeforeGive).none { it.dataComponentsPatch?.toString().orEmpty().contains("livetest:") },
+            "[$platform] Non-op received a custom item",
+        )
+
+        // C4. Craft a custom item from a custom ingredient at a crafting table, by clicking like a player.
+        server.sendConsoleCommand("clear FakeOp")
+        op.sendCommand("tp @s 0.5 -60 0.5")
+        op.sendCommand("setblock 1 -60 -2 minecraft:crafting_table")
+        op.sendCommand("setblock -1 -60 -2 minecraft:furnace")
+        Thread.sleep(1000)
+        val opItemsBeforeRuby = op.receivedItemCount()
+        val opChatBeforeRuby = op.chatCount()
+        op.sendCommand("femitems give FakeOp livetest:ruby")
+        op.awaitChatContaining("[FemItems] Gave 1x livetest:ruby to FakeOp.", sinceIndex = opChatBeforeRuby)
+        op.awaitItemMatching("custom ruby with its own item model", sinceIndex = opItemsBeforeRuby) { item ->
+            item.dataComponentsPatch?.toString().orEmpty().contains("livetest:ruby")
+        }
+        var screens = op.openedScreenCount()
+        op.useItemOnBlock(1, -60, -2)
+        val table = op.awaitScreenTitleContaining("crafting", sinceIndex = screens)
+        val slotsBeforeCraft = op.slotUpdateCount()
+        op.clickContainerSlot(table, 37) // hotbar 0: pick up the ruby
+        op.clickContainerSlot(table, 1)  // put it in the crafting grid
+        op.awaitSlotUpdate("ruby sword in the crafting result slot", sinceIndex = slotsBeforeCraft) { update ->
+            update.containerId == table.id && update.slot == 0 &&
+                update.item?.dataComponentsPatch?.toString().orEmpty().contains("livetest:ruby_sword")
+        }
+        val slotsBeforeTake = op.slotUpdateCount()
+        op.clickContainerSlot(table, 0)  // take the sword
+        op.clickContainerSlot(table, 38) // put it in hotbar 1
+        val crafted = op.awaitSlotUpdate("crafted ruby sword in the inventory", sinceIndex = slotsBeforeTake) { update ->
+            update.containerId == table.id && update.slot == 38 &&
+                update.item?.dataComponentsPatch?.toString().orEmpty().contains("livetest:ruby_sword")
+        }
+        assertTrue(crafted.item!!.dataComponentsPatch.toString().contains("1800"), "[$platform] Custom durability missing: ${crafted.item}")
+        op.closeContainer(table)
+
+        // C5. Right-click to wear a custom helmet; the other player sees it worn (custom equipment texture).
+        val opChatBeforeHelmet = op.chatCount()
+        val guestEquipmentBefore = guest.seenEquipmentCount()
+        val slotsBeforeEquip = op.slotUpdateCount()
+        op.sendCommand("femitems give FakeOp livetest:ruby_helmet")
+        op.awaitChatContaining("[FemItems] Gave 1x livetest:ruby_helmet to FakeOp.", sinceIndex = opChatBeforeHelmet)
+        Thread.sleep(500)
+        op.useHeldItem()
+        op.awaitSlotUpdate("ruby helmet in the head armour slot", sinceIndex = slotsBeforeEquip) { update ->
+            update.containerId == 0 && update.slot == 5 &&
+                update.item?.dataComponentsPatch?.toString().orEmpty().contains("livetest:ruby_helmet")
+        }
+        guest.awaitSeenEquipmentContaining("livetest:ruby", sinceIndex = guestEquipmentBefore)
+
+        // C6. Smelt custom raw ore into a custom ingot in a furnace, by clicking like a player.
+        val opChatBeforeRaw = op.chatCount()
+        op.sendCommand("femitems give FakeOp livetest:raw_ruby")
+        op.awaitChatContaining("[FemItems] Gave 1x livetest:raw_ruby to FakeOp.", sinceIndex = opChatBeforeRaw)
+        server.sendConsoleCommand("give FakeOp minecraft:coal")
+        Thread.sleep(1000)
+        screens = op.openedScreenCount()
+        op.useItemOnBlock(-1, -60, -2)
+        val furnace = op.awaitScreenTitleContaining("furnace", sinceIndex = screens)
+        val slotsBeforeSmelt = op.slotUpdateCount()
+        op.clickContainerSlot(furnace, 30) // hotbar 0: raw ruby
+        op.clickContainerSlot(furnace, 0)  // furnace input
+        op.clickContainerSlot(furnace, 32) // hotbar 2: coal
+        op.clickContainerSlot(furnace, 1)  // furnace fuel
+        op.awaitSlotUpdate("smelted ruby in the furnace output", sinceIndex = slotsBeforeSmelt, timeout = Duration.ofSeconds(20)) { update ->
+            update.containerId == furnace.id && update.slot == 2 &&
+                Regex("""livetest:ruby(?![_a-z])""").containsMatchIn(update.item?.dataComponentsPatch?.toString().orEmpty())
+        }
+        op.closeContainer(furnace)
+
+        // C7. A tagged mob drops a custom item.
+        val opItemsBeforeKill = op.receivedItemCount()
+        op.sendCommand("""summon minecraft:zombie ~ ~ ~ {Tags:["femitems.test_ruby"],NoAI:1b}""")
+        Thread.sleep(500)
+        op.sendCommand("kill @e[type=minecraft:zombie,distance=..10]")
+        Thread.sleep(500)
+        op.sendCommand("tp @e[type=minecraft:item,distance=..8] @s") // drops scatter; don't rely on where they land
+        op.awaitItemMatching("raw ruby dropped by the tagged zombie", sinceIndex = opItemsBeforeKill) { item ->
+            item.dataComponentsPatch?.toString().orEmpty().contains("livetest:raw_ruby")
+        }
     }
 }

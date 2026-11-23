@@ -28,17 +28,38 @@ object Messages {
     private fun render(template: String, vararg resolvers: TagResolver): Component =
         mm.deserialize(PREFIX + template, *resolvers)
 
-    fun reloaded(mobRules: Int, recipes: Int): Component = render(
-        "<color:$SUCCESS>Config reloaded.</color> <color:$MUTED>(<rules> mob rules, <recipes> recipes)</color>",
+    /** Custom items are only mentioned when there are some, so existing output stays unchanged. */
+    fun reloaded(mobRules: Int, recipes: Int, customItems: Int = 0): Component = render(
+        "<color:$SUCCESS>Config reloaded.</color> <color:$MUTED>(<rules> mob rules, <recipes> recipes<items>)</color>",
         Placeholder.unparsed("rules", mobRules.toString()),
         Placeholder.unparsed("recipes", recipes.toString()),
+        Placeholder.unparsed("items", if (customItems > 0) ", $customItems custom items" else ""),
+    )
+
+    fun customItems(ids: List<String>): Component = render(
+        "<color:$LAVENDER>Custom items (<count>):</color> <white><list></white>",
+        Placeholder.unparsed("count", ids.size.toString()),
+        Placeholder.unparsed("list", if (ids.isEmpty()) "none - add content packs to plugins/FemItems/contents/" else ids.joinToString(", ")),
+    )
+
+    fun unknownCustomItem(id: String): Component = render(
+        "<color:$ERROR>Unknown custom item: <id></color> <color:$MUTED>(see /femitems items)</color>",
+        Placeholder.unparsed("id", id),
+    )
+
+    fun gaveCustomItem(amount: Int, id: String, target: String): Component = render(
+        "<color:$SUCCESS>Gave <amount>x <id> to <target>.</color>",
+        Placeholder.unparsed("amount", amount.toString()),
+        Placeholder.unparsed("id", id),
+        Placeholder.unparsed("target", target),
     )
 
     fun reloadInProgress(): Component =
         render("<color:$MUTED>A reload is already in progress; please wait.</color>")
 
-    fun configError(line: Int?, detail: String): Component {
-        val text = if (line != null) "Config error at line $line." else "Config error; see console."
+    fun configError(line: Int?, detail: String, source: String = "config.yml"): Component {
+        val where = if (source == "config.yml") "Config error" else "Content pack error in $source"
+        val text = if (line != null) "$where at line $line." else "$where; see console."
         return render("<color:$ERROR><text></color> <color:$MUTED><italic>(hover for details)</italic></color>",
             Placeholder.unparsed("text", text),
         ).hoverEvent(HoverEvent.showText(Component.text(detail)))

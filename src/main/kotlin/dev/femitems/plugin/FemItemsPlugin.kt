@@ -1,6 +1,14 @@
 package dev.femitems.plugin
 
 import com.mojang.brigadier.Command
+import com.mojang.brigadier.arguments.IntegerArgumentType
+import com.mojang.brigadier.arguments.StringArgumentType
+import dev.femitems.plugin.items.ContentPackException
+import dev.femitems.plugin.items.CustomItemService
+import dev.femitems.plugin.items.LoadedItems
+import dev.femitems.plugin.items.ResourcePackSettings
+import io.papermc.paper.command.brigadier.argument.ArgumentTypes
+import io.papermc.paper.command.brigadier.argument.resolvers.selector.PlayerSelectorArgumentResolver
 import com.mojang.brigadier.tree.LiteralCommandNode
 import dev.femitems.plugin.jukebox.JukeboxCommands
 import dev.femitems.plugin.jukebox.JukeboxFeature
@@ -27,7 +35,12 @@ import org.bukkit.event.Listener
 import org.bukkit.event.entity.EntityDeathEvent
 import org.bukkit.event.player.PlayerJoinEvent
 import org.bukkit.inventory.ItemStack
+import org.bukkit.inventory.BlastingRecipe
+import org.bukkit.inventory.CampfireRecipe
+import org.bukkit.inventory.FurnaceRecipe
 import org.bukkit.inventory.Recipe
+import org.bukkit.inventory.RecipeChoice
+import org.bukkit.inventory.SmokingRecipe
 import org.bukkit.inventory.ShapedRecipe
 import org.bukkit.inventory.ShapelessRecipe
 import org.bukkit.inventory.meta.EnchantmentStorageMeta
@@ -40,7 +53,8 @@ import java.util.logging.Level
 class FemItemsPlugin : JavaPlugin(), Listener {
     private val recipeLock = Any()
     /** Recipes this plugin currently has registered, with the definition each was built from. Guarded by [recipeLock]. */
-    private val registeredDefinitions: MutableMap<NamespacedKey, RecipeDefinition> = LinkedHashMap()
+    /** Recipes this plugin has registered, with the fingerprint (definition + referenced custom items) each was built from. */
+    private val registeredDefinitions: MutableMap<NamespacedKey, Any> = LinkedHashMap()
 
     @Volatile
     private var registeredRecipeKeys: Set<NamespacedKey> = emptySet()
@@ -52,12 +66,16 @@ class FemItemsPlugin : JavaPlugin(), Listener {
 
     private val reloadInProgress = AtomicBoolean(false)
 
+    /** ItemsAdder-style custom items with their own textures, from `contents/<namespace>/`. */
+    private val customItems = CustomItemService(this)
+
     /** NBS music & Custom Jukebox feature (formerly the standalone FemJukebox plugin). */
     private var jukebox: JukeboxFeature? = null
 
     override fun onEnable() {
         saveDefaultConfig()
         server.pluginManager.registerEvents(this, this)
+        server.pluginManager.registerEvents(customItems, this)
 
         val platform = if (isFolia()) "Folia" else "Paper"
         logger.info("Initializing FemItems ${pluginMeta.version} on $platform.")
@@ -70,6 +88,7 @@ class FemItemsPlugin : JavaPlugin(), Listener {
     override fun onDisable() {
         jukebox?.disable()
         jukebox = null
+        customItems.shutdown()
         removeRegisteredRecipes()
     }
 
@@ -125,7 +144,50 @@ class FemItemsPlugin : JavaPlugin(), Listener {
                     Command.SINGLE_SUCCESS
                 },
             )
+            .then(
+                Commands.literal("items").executes { context ->
+                    context.source.sender.sendMessage(Messages.customItems(customItems.current.definitions.keys.toList()))
+                    Command.SINGLE_SUCCESS
+                },
+            )
+            .then(
+                Commands.literal("give")
+                    .requires { source -> source.sender.hasPermission("femitems.give") }
+                    .then(
+                        Commands.argument("player", ArgumentTypes.player()).then(
+                            Commands.argument("item", StringArgumentType.greedyString())
+                                .suggests { _, builder ->
+                                    val typed = builder.remainingLowerCase
+                                    customItems.current.definitions.keys.filter { it.startsWith(typed) }.forEach(builder::suggest)
+                                    builder.buildFuture()
+                                }
+                                .executes { context -> giveCustomItem(context.source.sender, context.getArgument("player", PlayerSelectorArgumentResolver::class.java).resolve(context.source), StringArgumentType.getString(context, "item")) },
+                        ),
+                    ),
+            )
             .build()
+
+    /** `/femitems give <player> <namespace:item> [amount]` — the amount is an optional trailing number. */
+    private fun giveCustomItem(sender: CommandSender, targets: List<Player>, input: String): Int {
+        val parts = input.trim().split(Regex("\\s+"))
+        val id = parts[0].lowercase(Locale.ROOT)
+        val amount = parts.getOrNull(1)?.toIntOrNull()?.coerceIn(1, 64 * 36) ?: 1
+        val template = customItems.create(id)
+        if (template == null) {
+            sender.sendMessage(Messages.unknownCustomItem(id))
+            return 0
+        }
+        for (target in targets) {
+            target.scheduler.run(this, { _ ->
+                for (stackSize in ConfigParser.splitIntoStacks(amount, template.maxStackSize)) {
+                    val stack = template.clone().apply { this.amount = stackSize }
+                    target.inventory.addItem(stack).values.forEach { target.world.dropItemNaturally(target.location, it) }
+                }
+                sender.sendMessage(Messages.gaveCustomItem(amount, id, target.name))
+            }, null)
+        }
+        return Command.SINGLE_SUCCESS
+    }
 
     private fun toggleDebugMobDeaths(): Boolean {
         while (true) {
@@ -137,17 +199,23 @@ class FemItemsPlugin : JavaPlugin(), Listener {
         }
     }
 
-    private class LoadedRecipe(val definition: RecipeDefinition, val recipe: Recipe) {
+    /** One server recipe; a smelting definition yields one per machine. [fingerprint] detects real changes. */
+    private class LoadedRecipe(val definition: RecipeDefinition, val recipe: Recipe, val fingerprint: Any) {
         val key: NamespacedKey = (recipe as Keyed).key
     }
 
-    private class LoadedContent(val mobRules: List<MobRule>, val recipes: List<LoadedRecipe>)
+    private class LoadedContent(
+        val mobRules: List<MobRule>,
+        val recipes: List<LoadedRecipe>,
+        val definitionCount: Int,
+        val items: LoadedItems,
+    )
 
     private class RecipeSwap(val registered: Set<NamespacedKey>, val added: Set<NamespacedKey>)
 
     private sealed interface LoadResult {
         class Loaded(val content: LoadedContent) : LoadResult
-        data class Failure(val line: Int?, val detail: String) : LoadResult
+        data class Failure(val line: Int?, val detail: String, val source: String = "config.yml") : LoadResult
     }
 
     /** Startup load: synchronous in onEnable so recipes exist before any player can join. */
@@ -173,7 +241,7 @@ class FemItemsPlugin : JavaPlugin(), Listener {
                 when (val result = loadContent()) {
                     is LoadResult.Failure -> {
                         reloadInProgress.set(false)
-                        sender.sendMessage(Messages.configError(result.line, result.detail))
+                        sender.sendMessage(Messages.configError(result.line, result.detail, result.source))
                     }
 
                     is LoadResult.Loaded -> scheduleApply(sender, result.content)
@@ -190,7 +258,7 @@ class FemItemsPlugin : JavaPlugin(), Listener {
             server.globalRegionScheduler.execute(this) {
                 try {
                     applyContent(content)
-                    sender.sendMessage(Messages.reloaded(content.mobRules.size, content.recipes.size))
+                    sender.sendMessage(Messages.reloaded(content.mobRules.size, content.definitionCount, content.items.count))
                 } catch (exception: Exception) {
                     logger.log(Level.SEVERE, "Failed to apply reloaded config", exception)
                     sender.sendMessage(Messages.configError(null, ConfigParser.conciseError(exception)))
@@ -210,11 +278,23 @@ class FemItemsPlugin : JavaPlugin(), Listener {
         return try {
             val newConfig = YamlConfiguration()
             newConfig.load(configFile)
-            val parsed = ConfigParser.parse(newConfig)
+            val settings = ResourcePackSettings.from(newConfig.getConfigurationSection("resource-pack"))
+            val items = customItems.load(settings)
+            val parsed = ConfigParser.parse(
+                newConfig,
+                customItems = items.definitions.mapValues { it.value.material },
+                customStackSize = { id -> items.templates[id]?.maxStackSize ?: 64 },
+            )
             // Build every Bukkit recipe before touching live state, so a bad recipe fails the whole
             // reload up front instead of leaving the server half-reloaded after reporting success.
-            val recipes = parsed.recipes.map { definition -> LoadedRecipe(definition, toBukkitRecipe(definition)) }
-            LoadResult.Loaded(LoadedContent(parsed.mobRules, recipes))
+            val recipes = parsed.recipes.flatMap { definition -> toBukkitRecipes(definition, items) }
+            LoadResult.Loaded(LoadedContent(parsed.mobRules, recipes, parsed.recipes.size, items))
+        } catch (exception: ContentPackException) {
+            val line = ConfigParser.findErrorLine(exception, exception.file).takeIf { it > 0 }
+            val detail = ConfigParser.conciseError(exception)
+            val source = exception.file.toPath().let { dataFolder.toPath().relativize(it).toString().replace('\\', '/') }
+            logger.warning("$source${if (line != null) " line $line" else ""}: $detail")
+            LoadResult.Failure(line, detail, source)
         } catch (exception: Exception) {
             val line = ConfigParser.findErrorLine(exception, configFile).takeIf { it > 0 }
             val detail = ConfigParser.conciseError(exception)
@@ -226,32 +306,61 @@ class FemItemsPlugin : JavaPlugin(), Listener {
 
     /** Must run on the global region thread (the main thread on Paper). */
     private fun applyContent(content: LoadedContent) {
+        customItems.apply(content.items)
         mobRules = content.mobRules
         val swap = replaceRegisteredRecipes(content.recipes)
         discoverRecipesForOnlinePlayers(swap.added)
-        logger.info("Loaded ${content.mobRules.size} mob rules and ${swap.registered.size} recipes.")
-    }
-
-    private fun toBukkitRecipe(definition: RecipeDefinition): Recipe {
-        val key = NamespacedKey(this, definition.id.lowercase(Locale.ROOT))
-        val result = createItemStack(definition.result)
-        return when (definition) {
-            is ShapedRecipeDefinition -> ShapedRecipe(key, result).apply {
-                shape(*definition.shape.toTypedArray())
-                for ((symbol, material) in definition.ingredients) {
-                    setIngredient(symbol, material)
-                }
-            }
-
-            is ShapelessRecipeDefinition -> ShapelessRecipe(key, result).apply {
-                for (material in definition.ingredients) {
-                    addIngredient(material)
-                }
-            }
+        logger.info("Loaded ${content.mobRules.size} mob rules and ${content.definitionCount} recipes.")
+        if (content.items.count > 0) {
+            logger.info("Loaded ${content.items.count} custom items from ${content.items.packs.size} content pack(s).")
         }
     }
 
-    private fun createItemStack(definition: ItemDefinition): ItemStack {
+    private fun toBukkitRecipes(definition: RecipeDefinition, items: LoadedItems): List<LoadedRecipe> {
+        val baseKey = definition.id.lowercase(Locale.ROOT)
+        val result = createItemStack(definition.result, items)
+        // Rebuild a recipe when its definition or any custom item it uses (ingredient or result) changes.
+        val referenced = when (definition) {
+            is ShapedRecipeDefinition -> definition.ingredients.values
+            is ShapelessRecipeDefinition -> definition.ingredients
+            is CookingRecipeDefinition -> listOf(definition.ingredient)
+        }.filterIsInstance<Ingredient.Custom>().map(Ingredient.Custom::id) + listOfNotNull(definition.result.customItem)
+        val fingerprint = listOf(definition) + referenced.sorted().map { items.definitions[it] }
+        fun choice(ingredient: Ingredient): RecipeChoice = when (ingredient) {
+            is Ingredient.Vanilla -> RecipeChoice.MaterialChoice(ingredient.material)
+            is Ingredient.Custom -> RecipeChoice.ExactChoice(items.templates.getValue(ingredient.id))
+        }
+        return when (definition) {
+            is ShapedRecipeDefinition -> listOf(
+                ShapedRecipe(NamespacedKey(this, baseKey), result).apply {
+                    shape(*definition.shape.toTypedArray())
+                    for ((symbol, ingredient) in definition.ingredients) setIngredient(symbol, choice(ingredient))
+                },
+            )
+
+            is ShapelessRecipeDefinition -> listOf(
+                ShapelessRecipe(NamespacedKey(this, baseKey), result).apply {
+                    for (ingredient in definition.ingredients) addIngredient(choice(ingredient))
+                },
+            )
+
+            is CookingRecipeDefinition -> definition.machines.map { machine ->
+                val key = NamespacedKey(this, baseKey + machine.keySuffix)
+                val input = choice(definition.ingredient)
+                when (machine) {
+                    CookingMachine.FURNACE -> FurnaceRecipe(key, result, input, definition.experience, definition.cookTime)
+                    CookingMachine.BLAST_FURNACE -> BlastingRecipe(key, result, input, definition.experience, definition.cookTime)
+                    CookingMachine.SMOKER -> SmokingRecipe(key, result, input, definition.experience, definition.cookTime)
+                    CookingMachine.CAMPFIRE -> CampfireRecipe(key, result, input, definition.experience, definition.cookTime)
+                }
+            }
+        }.map { LoadedRecipe(definition, it, fingerprint) }
+    }
+
+    private fun createItemStack(definition: ItemDefinition, items: LoadedItems = customItems.current): ItemStack {
+        definition.customItem?.let { id ->
+            return items.templates.getValue(id).clone().apply { amount = definition.amount }
+        }
         val item = ItemStack(definition.material, definition.amount)
         val hasMetaChanges = definition.name != null ||
             definition.lore.isNotEmpty() ||
@@ -307,11 +416,11 @@ class FemItemsPlugin : JavaPlugin(), Listener {
      */
     private fun replaceRegisteredRecipes(recipes: List<LoadedRecipe>): RecipeSwap = synchronized(recipeLock) {
         val wanted = recipes.associateBy(LoadedRecipe::key)
-        val toAdd = wanted.values.filter { registeredDefinitions[it.key] != it.definition }
+        val toAdd = wanted.values.filter { registeredDefinitions[it.key] != it.fingerprint }
 
         val toRemove = LinkedHashSet<NamespacedKey>()
         for ((key, definition) in registeredDefinitions) {
-            if (wanted[key]?.definition != definition) {
+            if (wanted[key]?.fingerprint != definition) {
                 toRemove += key
             }
         }
@@ -332,7 +441,7 @@ class FemItemsPlugin : JavaPlugin(), Listener {
             Bukkit.addRecipes(toAdd.map(LoadedRecipe::recipe))
             for (entry in toAdd) {
                 if (Bukkit.getRecipe(entry.key) != null) {
-                    registeredDefinitions[entry.key] = entry.definition
+                    registeredDefinitions[entry.key] = entry.fingerprint
                     added += entry.key
                 }
             }
@@ -384,7 +493,9 @@ class FemItemsPlugin : JavaPlugin(), Listener {
 
         val drops = ConfigParser.rollDrops(rules, entity.type, customNamePlain, scoreboardTags = entity.scoreboardTags)
         for (drop in drops) {
-            val template = if (drop.randomEnchantment) {
+            val template = if (drop.customItem != null) {
+                customItems.create(drop.customItem) ?: continue
+            } else if (drop.randomEnchantment) {
                 createRandomEnchantedBook(drop.name)
             } else {
                 createItemStack(ItemDefinition(material = drop.material, amount = 1, name = drop.name))

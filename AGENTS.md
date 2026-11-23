@@ -58,6 +58,7 @@ This plugin **must** run identically on both **Paper** and **Folia** from a sing
 | `src/main/kotlin/dev/femitems/plugin/Messages.kt` | Styled Adventure/MiniMessage chat output (gradient prefix, hover details, clickable commands). Keep each message's plain-text form stable — live tests and smoke scripts match on it |
 | `src/main/kotlin/dev/femitems/plugin/ConfigParser.kt` | Pure YAML config parsing, validation, drop rolling, and line-number error reporting |
 | `src/main/kotlin/dev/femitems/plugin/jukebox/` | Jukebox / NBS music feature (formerly FemJukebox): pure song readers (`NbsReader`, `GnbsReader`, `NbsToGnbsConverter`, `SongCatalog`, `SongClock`), `MusicService` (playback state mutated only on the global region thread; sounds/bossbars via each player's `EntityScheduler`), `JukeboxMenu` (block events + GUI; block data via `RegionScheduler`), `JukeboxCommands` (`/femjukebox`). PDC keys deliberately keep the `femjukebox:` namespace for compatibility |
+| `src/main/kotlin/dev/femitems/plugin/items/` | Custom items (ItemsAdder-style): `ContentPackLoader` (pure parsing of `contents/<namespace>/*.yml` + texture checks), `ResourcePackBuilder` (pure, deterministic pack zip + SHA-1), `PackServer` (built-in HTTP pack host) and `ResourcePackSettings`, `CustomItemService` (item stacks with `item_model`/equippable/durability/attributes, pack sending on join and on change, vanilla-recipe guards) |
 | `src/main/resources/jukebox/` | Default `jukebox/config.yml` and `resource-pack-discs.yml`, saved to `plugins/FemItems/jukebox/` |
 | `src/main/resources/paper-plugin.yml` | Native Paper/Folia plugin descriptor (`folia-supported: true`, filtered version) |
 | `src/main/resources/config.yml` | Default mob drops and recipes configuration |
@@ -126,8 +127,9 @@ What `LiveServerFakePlayerIT` verifies automatically on **both Paper 26.3 and Fo
 6. Verifies player-initiated `/femitems debug`, summoning & killing a custom-named mob in the live world, and receiving the expected custom drops (including custom Adventure display names and exact stack counts) directly in `FakeOp`'s Minecraft client inventory packets.
 7. Verifies invalid config reload error-line reporting without crashing, and that a failed reload (including a shaped ingredient symbol missing from the shape) keeps previously registered recipes intact.
    Also verifies the bare `/femitems` info panel, reload counts, and that oversized drops (70 arrows) arrive split into valid stacks.
-8. Verifies the jukebox: `/femjukebox reload` of dropped-in `.gnbs` songs, non-admin restrictions, personal playback heard by **both** fake players (sound packets), pause/resume/stop (stop-sound packets), `give`/`disc` items, inserting a disc into a Custom Jukebox block, automatic disc ejection and pickup, the GUI opening instead of replacing an inserted disc, and — driven purely by player actions — placing a Custom Jukebox from its item, GUI clicks (volume with sound-volume check, song browser, pause/resume/stop, admin page, disc eject), `/femjukebox map`, and survival-mining a playing jukebox (music stops, jukebox item and disc drop).
-9. Disconnects fake players cleanly, shuts down each server with exit code `0`, and fails on any `FemItems` exception, `UnsupportedOperationException`, or Folia region-thread violation.
+8. Verifies custom items: a content pack is turned into a resource pack that both fake players are offered, download from FemItems' web server and hash-check; `/femitems items` and `give` (with non-op refusal); crafting a custom result from a custom ingredient at a crafting table by slot clicks; wearing a custom helmet by right-click (and the other player seeing it); smelting custom ore in a furnace by slot clicks; and a tagged mob dropping a custom item.
+9. Verifies the jukebox: `/femjukebox reload` of dropped-in `.gnbs` songs, non-admin restrictions, personal playback heard by **both** fake players (sound packets), pause/resume/stop (stop-sound packets), `give`/`disc` items, inserting a disc into a Custom Jukebox block, automatic disc ejection and pickup, the GUI opening instead of replacing an inserted disc, and — driven purely by player actions — placing a Custom Jukebox from its item, GUI clicks (volume with sound-volume check, song browser, pause/resume/stop, admin page, disc eject), `/femjukebox map`, and survival-mining a playing jukebox (music stops, jukebox item and disc drop).
+10. Disconnects fake players cleanly, shuts down each server with exit code `0`, and fails on any `FemItems` exception, `UnsupportedOperationException`, or Folia region-thread violation.
 
 ### Step 5: Interactive In-Game Testing (When Needed)
 For manual visual/gameplay verification with a real Minecraft 26.3 client:
@@ -166,6 +168,8 @@ Every player-facing feature is tested by **offline-mode fake players doing exact
 | Mine a block | `breakBlock(x, y, z, hold)` (survival: give Haste or hold long enough; creative breaks instantly) |
 | Click a slot in a server-opened GUI | `clickContainerSlot(screen, slot)` with `screen` from `awaitScreenTitleContaining(...)` |
 | Close a GUI (Esc) | `closeContainer(screen)` |
+| Right-click with the held item in the air (equip armour, eat, ...) | `useHeldItem()` |
+| Accept a server resource pack (download, verify SHA-1, report status) | automatic; inspect with `awaitPackOffer(...)` |
 
 | Capture | Count / await |
 | :--- | :--- |
@@ -173,6 +177,9 @@ Every player-facing feature is tested by **offline-mode fake players doing exact
 | Inventory items (with components) | `receivedItemCount()`, `awaitItemMatching(...)` |
 | Sounds played / stopped | `soundCount()`, `awaitSoundContaining(name) { it.volume ... }`, `stoppedSoundCount()`, `awaitStoppedSoundContaining(...)` |
 | Opened screens | `openedScreenCount()`, `awaitScreenTitleContaining(...)` |
+| Individual slots (container id, slot index, item) incl. full resyncs | `slotUpdateCount()`, `awaitSlotUpdate(...)` |
+| Equipment seen on other entities | `seenEquipmentCount()`, `awaitSeenEquipmentContaining(...)` |
+| Resource pack offers | `offeredPackCount()`, `awaitPackOffer(...)` |
 | Recipe resyncs | `recipeResyncCount()` |
 
 Always take the count **before** triggering an action and pass it as `sinceIndex`, so earlier events cannot satisfy the assertion. To add a new action or capture, extend `FakePlayerClient` with the matching MCProtocolLib packet (test scope only; never shade MCProtocolLib).

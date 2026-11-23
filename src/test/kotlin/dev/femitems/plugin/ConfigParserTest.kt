@@ -140,7 +140,7 @@ class ConfigParserTest {
         val shaped = parsed.recipes[0] as ShapedRecipeDefinition
         assertEquals("arena_blade", shaped.id)
         assertEquals(listOf(" I ", " I ", " S "), shaped.shape)
-        assertEquals(mapOf('I' to Material.IRON_INGOT, 'S' to Material.STICK), shaped.ingredients)
+        assertEquals(mapOf('I' to Ingredient.Vanilla(Material.IRON_INGOT), 'S' to Ingredient.Vanilla(Material.STICK)), shaped.ingredients)
         assertEquals(Material.IRON_SWORD, shaped.result.material)
         assertEquals(1, shaped.result.amount)
         assertEquals("&6Arena Blade", shaped.result.name)
@@ -156,7 +156,7 @@ class ConfigParserTest {
 
         val shapeless = parsed.recipes[1] as ShapelessRecipeDefinition
         assertEquals("gem_mix", shapeless.id)
-        assertEquals(listOf(Material.DIAMOND, Material.EMERALD), shapeless.ingredients)
+        assertEquals(listOf(Ingredient.Vanilla(Material.DIAMOND), Ingredient.Vanilla(Material.EMERALD)), shapeless.ingredients)
         assertEquals(Material.ECHO_SHARD, shapeless.result.material)
         assertEquals(2, shapeless.result.amount)
         assertNull(shapeless.result.name)
