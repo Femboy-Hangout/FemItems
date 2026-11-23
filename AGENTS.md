@@ -57,6 +57,8 @@ This plugin **must** run identically on both **Paper** and **Folia** from a sing
 | `src/main/kotlin/dev/femitems/plugin/ConfigModels.kt` | Immutable Kotlin data models for rules, recipes, and rolled drops |
 | `src/main/kotlin/dev/femitems/plugin/Messages.kt` | Styled Adventure/MiniMessage chat output (gradient prefix, hover details, clickable commands). Keep each message's plain-text form stable — live tests and smoke scripts match on it |
 | `src/main/kotlin/dev/femitems/plugin/ConfigParser.kt` | Pure YAML config parsing, validation, drop rolling, and line-number error reporting |
+| `src/main/kotlin/dev/femitems/plugin/jukebox/` | Jukebox / NBS music feature (formerly FemJukebox): pure song readers (`NbsReader`, `GnbsReader`, `NbsToGnbsConverter`, `SongCatalog`, `SongClock`), `MusicService` (playback state mutated only on the global region thread; sounds/bossbars via each player's `EntityScheduler`), `JukeboxMenu` (block events + GUI; block data via `RegionScheduler`), `JukeboxCommands` (`/femjukebox`). PDC keys deliberately keep the `femjukebox:` namespace for compatibility |
+| `src/main/resources/jukebox/` | Default `jukebox/config.yml` and `resource-pack-discs.yml`, saved to `plugins/FemItems/jukebox/` |
 | `src/main/resources/paper-plugin.yml` | Native Paper/Folia plugin descriptor (`folia-supported: true`, filtered version) |
 | `src/main/resources/config.yml` | Default mob drops and recipes configuration |
 | `src/test/kotlin/dev/femitems/plugin/` | Fast JUnit 5 unit tests (`*Test.kt`) |
@@ -84,6 +86,7 @@ Because `paper-plugin.yml` uses `${project.version}` and CI creates a GitHub Rel
 - **Paper 26.3 `RegistryAccess` caveat:** Outside a live Paper/Folia server, calling certain `Material` methods (such as `Material.isAir()` or `Material.maxStackSize`) triggers `IllegalStateException: No RegistryAccess implementation found`. Keep pure seams/injectable providers (see `ConfigParser.parse(..., maxStackSizeProvider)`) so JUnit 5 tests stay fast and isolated without needing a mocked server registry.
 - Add or update unit tests under `src/test/kotlin/dev/femitems/plugin/` for every new behavior or bug fix.
 - **Add or update live fake-player tests** in `src/test/kotlin/dev/femitems/plugin/live/LiveServerFakePlayerIT.kt` whenever you add or change commands, permissions, listeners, mob drops, recipes, or any in-game plugin behavior. Use `FakePlayerClient` (backed by `org.geysermc.mcprotocollib:protocol`, test-scoped only — never shade it) to connect real headless fake players and assert chat feedback, inventory packets, permissions, and server state.
+- Follow the **Offline Fake-Player Testing Procedure** in [section 5](#5-offline-fake-player-testing-procedure-standard-for-every-feature): every feature is exercised through player actions (commands, right-clicks, placing/breaking, GUI clicks) by offline-mode fake players, never only through console shortcuts.
 
 ### Step 3: Build & Run Unit Tests
 Run the fast Maven verification lifecycle using the Maven Wrapper:
@@ -123,7 +126,8 @@ What `LiveServerFakePlayerIT` verifies automatically on **both Paper 26.3 and Fo
 6. Verifies player-initiated `/femitems debug`, summoning & killing a custom-named mob in the live world, and receiving the expected custom drops (including custom Adventure display names and exact stack counts) directly in `FakeOp`'s Minecraft client inventory packets.
 7. Verifies invalid config reload error-line reporting without crashing, and that a failed reload (including a shaped ingredient symbol missing from the shape) keeps previously registered recipes intact.
    Also verifies the bare `/femitems` info panel, reload counts, and that oversized drops (70 arrows) arrive split into valid stacks.
-8. Disconnects fake players cleanly, shuts down each server with exit code `0`, and fails on any `FemItems` exception, `UnsupportedOperationException`, or Folia region-thread violation.
+8. Verifies the jukebox: `/femjukebox reload` of dropped-in `.gnbs` songs, non-admin restrictions, personal playback heard by **both** fake players (sound packets), pause/resume/stop (stop-sound packets), `give`/`disc` items, inserting a disc into a Custom Jukebox block, automatic disc ejection and pickup, the GUI opening instead of replacing an inserted disc, and — driven purely by player actions — placing a Custom Jukebox from its item, GUI clicks (volume with sound-volume check, song browser, pause/resume/stop, admin page, disc eject), `/femjukebox map`, and survival-mining a playing jukebox (music stops, jukebox item and disc drop).
+9. Disconnects fake players cleanly, shuts down each server with exit code `0`, and fails on any `FemItems` exception, `UnsupportedOperationException`, or Folia region-thread violation.
 
 ### Step 5: Interactive In-Game Testing (When Needed)
 For manual visual/gameplay verification with a real Minecraft 26.3 client:
@@ -138,3 +142,47 @@ For manual visual/gameplay verification with a real Minecraft 26.3 client:
   2. Builds and uploads `target/femitems-<version>.jar` as a downloadable GitHub Actions workflow artifact.
   3. Runs `LiveServerFakePlayerIT` against **both live Paper 26.3 and live Folia 26.3** servers with connected fake players.
   4. On pushes to `main` (or `v*` tags) with a new `pom.xml` version, automatically tags `v<version>` and publishes a GitHub Release with the built JAR attached.
+
+---
+
+## 5. Offline Fake-Player Testing Procedure (Standard for Every Feature)
+
+Every player-facing feature is tested by **offline-mode fake players doing exactly what a human player would do**, on both Paper and Folia, in `LiveServerFakePlayerIT`. The test servers run with `online-mode=false`, so `FakePlayerClient` (MCProtocolLib) logs in under any name without a Mojang account. This is the standard way to prove a feature works; "it compiles" and unit tests are not enough.
+
+### 5.1 Rules
+1. **Act through the player, not the console.** Trigger the feature with the same packets a real client sends: commands typed by the player, right-clicks on blocks, placing blocks from real items, mining, and clicking GUI slots. The console (or an op player's vanilla commands) is only for **setup and cleanup**: `op`, `gamemode`, `effect`, `clear`, `give` of vanilla items, `tp`, `kill`, `setblock air`. Never use `setblock`/NBT to fake a state the feature itself is supposed to create (e.g. place a custom block from its item so the place listener runs).
+2. **Assert on what the client receives**: plain-text chat, inventory items and their data components, sounds (name/volume/pitch), stop-sound packets, opened screen titles, plus server-side checks via `/execute if block …` when needed. Finally `stopAndAssertClean()` must find no plugin exception, `UnsupportedOperationException`, or Folia `off owning region` error.
+3. **Cover both permission sides**: `FakeOp` (operator) for the feature, `FakeGuest` (non-op) to prove admin parts are refused or hidden and nothing is granted.
+4. **Cover every interaction path you add or change**: each command and subcommand, each GUI button and page, place / use / break of custom blocks, and multi-player effects (e.g. a second player within range also receives sounds).
+5. **Run the full suite on both platforms** (`.\mvnw.cmd -B clean verify -P live-test`). `-Dlive.platform=paper|folia` is only for iterating. When fixing a flaky step, find the cause and run the full suite at least twice before calling it fixed.
+6. **Report gaps honestly.** Anything that cannot be exercised by a headless client (e.g. whether resource-pack audio is audible) must be named as untested in your final summary.
+
+### 5.2 `FakePlayerClient` actions and captures
+
+| Action | Method |
+| :--- | :--- |
+| Run a command as the player | `sendCommand("femjukebox play livetest")` |
+| Right-click a block's top face (use / place held block on it) | `useItemOnBlock(x, y, z)` |
+| Mine a block | `breakBlock(x, y, z, hold)` (survival: give Haste or hold long enough; creative breaks instantly) |
+| Click a slot in a server-opened GUI | `clickContainerSlot(screen, slot)` with `screen` from `awaitScreenTitleContaining(...)` |
+| Close a GUI (Esc) | `closeContainer(screen)` |
+
+| Capture | Count / await |
+| :--- | :--- |
+| System chat (plain text) | `chatCount()`, `awaitChatContaining(...)`, `assertNoChatContaining(...)` |
+| Inventory items (with components) | `receivedItemCount()`, `awaitItemMatching(...)` |
+| Sounds played / stopped | `soundCount()`, `awaitSoundContaining(name) { it.volume ... }`, `stoppedSoundCount()`, `awaitStoppedSoundContaining(...)` |
+| Opened screens | `openedScreenCount()`, `awaitScreenTitleContaining(...)` |
+| Recipe resyncs | `recipeResyncCount()` |
+
+Always take the count **before** triggering an action and pass it as `sinceIndex`, so earlier events cannot satisfy the assertion. To add a new action or capture, extend `FakePlayerClient` with the matching MCProtocolLib packet (test scope only; never shade MCProtocolLib).
+
+### 5.3 Known pitfalls (all hit in practice)
+- **Flat-world slimes**: they kill fake players (a dead player gets `chat.disabled.options` and picks nothing up) and **block placement** when standing in the target space; killing big slimes only splits them. Minecraft 26.x ignores the old `spawn-monsters` server property, so `LiveServerHarness` sets the `spawn_monsters` game rule to `false` at boot and deletes the world's saved entities before every run. Both players also get infinite Resistance on join.
+- **Any entity blocks block placement, including the other fake player.** Players spawn at random spots near world spawn, so pin them with `tp` before placing blocks, and probe the target space with `/execute if entity @e[x=..,y=..,z=..,dx=0,dy=0,dz=0]` (see `assertNoEntityIn`) so a failure names its cause.
+- **The world persists between runs** (only player data and entities are reset): clear leftover blocks (`setblock … air`) at the start of a step, and don't assert on block states the world changes by itself (grass turns to dirt under a block).
+- **Folia has no `/data` command**, and translatable feedback is captured as its key only (e.g. `commands.execute.conditional.pass`). Verify through gameplay or `/execute if block`.
+- **Item physics**: dropped items bounce and roll. Teleport them to the player (`tp @e[type=minecraft:item,distance=..8] @s`) instead of relying on where they land.
+- **Reach**: keep targets within ~4 blocks of the player's eyes; `tp` the player to a known spot first.
+- **Close GUIs** (`closeContainer`) before moving on, as a real player would.
+- **Don't race the feature's timing**: e.g. wait until a note has actually sounded before asserting that Stop sends stop-sound packets; use the `await*` helpers instead of fixed sleeps wherever possible.

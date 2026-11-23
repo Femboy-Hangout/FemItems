@@ -55,6 +55,9 @@ class LiveServerHarness(
         deleteRecursively(serverDir.resolve("world").resolve("playerdata"))
         deleteRecursively(serverDir.resolve("world").resolve("advancements"))
         deleteRecursively(serverDir.resolve("world").resolve("stats"))
+        // The world persists between runs; drop its saved entities so mobs (flat-world slimes split and
+        // multiply) and dropped items never pile up from one run into the next.
+        deleteRecursively(serverDir.resolve("world").resolve("dimensions").resolve("minecraft").resolve("overworld").resolve("entities"))
 
         Files.copy(
             pluginJar,
@@ -115,9 +118,17 @@ class LiveServerHarness(
         stdinWriter = BufferedWriter(OutputStreamWriter(startedProc.outputStream, StandardCharsets.UTF_8))
 
         awaitLog(Regex("""Done \([0-9.,]+s\)!"""), timeout = timeout)
+
+        // 26.x replaced the `spawn-monsters` server property with this game rule; without it slimes keep
+        // spawning on the flat world, killing fake players and blocking block placement.
+        val logBeforeRule = readLog().length
+        sendConsoleCommand("gamerule spawn_monsters false")
+        awaitLog(Regex("""spawn_monsters.*false"""), fromOffset = logBeforeRule)
     }
 
     fun pluginConfigFile(): Path = serverDir.resolve("plugins").resolve("FemItems").resolve("config.yml")
+
+    fun jukeboxSongsDir(): Path = serverDir.resolve("plugins").resolve("FemItems").resolve("jukebox").resolve("gnbs")
 
     fun sendConsoleCommand(command: String) {
         val writer = checkNotNull(stdinWriter) { "Server '$platform' is not running" }

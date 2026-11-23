@@ -1,6 +1,7 @@
 package dev.femitems.plugin.live
 
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
+import org.cloudburstmc.math.vector.Vector3i
 import org.geysermc.mcprotocollib.network.Session
 import org.geysermc.mcprotocollib.network.event.session.DisconnectedEvent
 import org.geysermc.mcprotocollib.network.event.session.SessionAdapter
@@ -8,30 +9,50 @@ import org.geysermc.mcprotocollib.network.factory.ClientNetworkSessionFactory
 import org.geysermc.mcprotocollib.network.packet.Packet
 import org.geysermc.mcprotocollib.network.session.ClientNetworkSession
 import org.geysermc.mcprotocollib.protocol.MinecraftProtocol
+import org.geysermc.mcprotocollib.protocol.data.game.entity.`object`.Direction
+import org.geysermc.mcprotocollib.protocol.data.game.entity.player.Hand
 import org.geysermc.mcprotocollib.protocol.data.game.entity.player.HandPreference
+import org.geysermc.mcprotocollib.protocol.data.game.entity.player.PlayerAction
+import org.geysermc.mcprotocollib.protocol.data.game.inventory.ClickItemAction
+import org.geysermc.mcprotocollib.protocol.data.game.inventory.ContainerActionType
+import org.geysermc.mcprotocollib.protocol.data.game.item.HashedStack
 import org.geysermc.mcprotocollib.protocol.data.game.item.ItemStack
 import org.geysermc.mcprotocollib.protocol.data.game.setting.ChatVisibility
 import org.geysermc.mcprotocollib.protocol.data.game.setting.ParticleStatus
 import org.geysermc.mcprotocollib.protocol.data.game.setting.SkinPart
 import org.geysermc.mcprotocollib.protocol.packet.common.serverbound.ServerboundClientInformationPacket
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.ClientboundLoginPacket
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.ClientboundStopSoundPacket
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.ClientboundSystemChatPacket
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.ClientboundUpdateRecipesPacket
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.player.ClientboundPlayerPositionPacket
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.inventory.ClientboundContainerSetContentPacket
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.inventory.ClientboundContainerSetSlotPacket
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.inventory.ClientboundOpenScreenPacket
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.level.ClientboundSoundPacket
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.ServerboundChatCommandPacket
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.ServerboundClientTickEndPacket
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.ServerboundPlayerLoadedPacket
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.level.ServerboundAcceptTeleportationPacket
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.inventory.ServerboundContainerClickPacket
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.inventory.ServerboundContainerClosePacket
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundPlayerActionPacket
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundUseItemOnPacket
 import java.time.Duration
 import java.time.Instant
 import java.util.ArrayDeque
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
+
+/** A sound the client was told to play. */
+data class CapturedSound(val name: String, val volume: Float, val pitch: Float)
+
+/** A container screen the server opened on the client. [id] is needed to click its slots. */
+data class OpenedScreen(val id: Int, val title: String)
 
 internal class BoundedEventBuffer<T>(private val capacity: Int) {
     private val entries = ArrayDeque<T>()
@@ -87,6 +108,11 @@ class FakePlayerClient(
     private val chatMessages = BoundedEventBuffer<String>(MAX_CAPTURED_EVENTS)
     private val receivedItems = BoundedEventBuffer<ItemStack>(MAX_CAPTURED_EVENTS)
     private val recipeResyncs = AtomicInteger(0)
+    private val sounds = BoundedEventBuffer<CapturedSound>(MAX_CAPTURED_EVENTS)
+    private val stoppedSounds = BoundedEventBuffer<String>(MAX_CAPTURED_EVENTS)
+    private val openedScreens = BoundedEventBuffer<OpenedScreen>(MAX_CAPTURED_EVENTS)
+    private val containerStateIds = ConcurrentHashMap<Int, Int>()
+    private val blockSequence = AtomicInteger(0)
 
     private var session: ClientNetworkSession? = null
 
@@ -145,7 +171,17 @@ class FakePlayerClient(
                         chatMessages.add(plain)
                     }
 
+                    is ClientboundSoundPacket -> sounds.add(CapturedSound(packet.sound.name, packet.volume, packet.pitch))
+
+                    // A stop without a sound key stops every sound (in the category).
+                    is ClientboundStopSoundPacket -> stoppedSounds.add(packet.sound?.asString() ?: "*")
+
+                    is ClientboundOpenScreenPacket -> openedScreens.add(
+                        OpenedScreen(packet.containerId, PlainTextComponentSerializer.plainText().serialize(packet.title)),
+                    )
+
                     is ClientboundContainerSetSlotPacket -> {
+                        containerStateIds[packet.containerId] = packet.stateId
                         val item = packet.item
                         if (item != null && item.amount > 0) {
                             receivedItems.add(item)
@@ -153,6 +189,7 @@ class FakePlayerClient(
                     }
 
                     is ClientboundContainerSetContentPacket -> {
+                        containerStateIds[packet.containerId] = packet.stateId
                         for (item in packet.items) {
                             if (item != null && item.amount > 0) {
                                 receivedItems.add(item)
@@ -204,6 +241,106 @@ class FakePlayerClient(
             "Fake player '$username' disconnected before command '$command': ${disconnectReason.get()}"
         }
         active.send(ServerboundChatCommandPacket(command.removePrefix("/")))
+    }
+
+    /** Right-clicks the top face of the block at [x], [y], [z] with the main hand. */
+    fun useItemOnBlock(x: Int, y: Int, z: Int) {
+        send(
+            ServerboundUseItemOnPacket(
+                Vector3i.from(x, y, z),
+                Direction.UP,
+                Hand.MAIN_HAND,
+                0.5f,
+                1f,
+                0.5f,
+                false,
+                false,
+                blockSequence.incrementAndGet(),
+            ),
+        )
+    }
+
+    /** Left-clicks [slot] (0-based, top inventory first) of a container screen the server opened. */
+    fun clickContainerSlot(screen: OpenedScreen, slot: Int) {
+        send(
+            ServerboundContainerClickPacket(
+                screen.id,
+                containerStateIds[screen.id] ?: 0,
+                slot,
+                ContainerActionType.CLICK_ITEM,
+                ClickItemAction.LEFT_CLICK,
+                null,
+                HashMap<Int, HashedStack>() as Map<Int, HashedStack>,
+            ),
+        )
+    }
+
+    /** Closes a container screen, as pressing Esc does. */
+    fun closeContainer(screen: OpenedScreen) {
+        send(ServerboundContainerClosePacket(screen.id))
+    }
+
+    /**
+     * Mines the block at [x], [y], [z] as a player would: start digging, hold for [hold], finish.
+     * Survival needs enough time (or Haste) for the block's hardness; creative breaks instantly.
+     */
+    fun breakBlock(x: Int, y: Int, z: Int, hold: Duration = Duration.ofSeconds(1)) {
+        val position = Vector3i.from(x, y, z)
+        send(ServerboundPlayerActionPacket(PlayerAction.START_DIGGING, position, Direction.UP, blockSequence.incrementAndGet()))
+        Thread.sleep(hold.toMillis())
+        send(ServerboundPlayerActionPacket(PlayerAction.FINISH_DIGGING, position, Direction.UP, blockSequence.incrementAndGet()))
+    }
+
+    private fun send(packet: Packet) {
+        val active = checkNotNull(session) { "Fake player '$username' is not connected" }
+        check(active.isConnected) { "Fake player '$username' disconnected: ${disconnectReason.get()}" }
+        active.send(packet)
+    }
+
+    fun soundCount(): Int = sounds.count()
+
+    fun stoppedSoundCount(): Int = stoppedSounds.count()
+
+    fun openedScreenCount(): Int = openedScreens.count()
+
+    /** Waits for a played sound whose name contains [substring] (e.g. `note_block.harp`). */
+    fun awaitSoundContaining(
+        substring: String,
+        sinceIndex: Int = 0,
+        timeout: Duration = Duration.ofSeconds(15),
+        predicate: (CapturedSound) -> Boolean = { true },
+    ): CapturedSound =
+        awaitEvent(sounds, "sound containing '$substring'", sinceIndex, timeout) { it.name.contains(substring) && predicate(it) }
+
+    /** Waits for a stop-sound packet whose sound key contains [substring] (or a stop-all). */
+    fun awaitStoppedSoundContaining(substring: String, sinceIndex: Int = 0, timeout: Duration = Duration.ofSeconds(15)): String =
+        awaitEvent(stoppedSounds, "stopped sound containing '$substring'", sinceIndex, timeout) {
+            it == "*" || it.contains(substring)
+        }
+
+    /** Waits for a container screen whose plain-text title contains [substring]. */
+    fun awaitScreenTitleContaining(substring: String, sinceIndex: Int = 0, timeout: Duration = Duration.ofSeconds(15)): OpenedScreen =
+        awaitEvent(openedScreens, "screen titled '$substring'", sinceIndex, timeout) { it.title.contains(substring) }
+
+    private fun <T> awaitEvent(
+        buffer: BoundedEventBuffer<T>,
+        description: String,
+        sinceIndex: Int,
+        timeout: Duration,
+        predicate: (T) -> Boolean,
+    ): T {
+        val deadline = Instant.now().plus(timeout)
+        while (Instant.now().isBefore(deadline)) {
+            buffer.snapshotSince(sinceIndex).firstOrNull(predicate)?.let { return it }
+            if (disconnectReason.get() != null) {
+                throw AssertionError("Fake player '$username' disconnected while waiting for $description: ${disconnectReason.get()}")
+            }
+            Thread.sleep(50)
+        }
+        throw AssertionError(
+            "Timed out waiting for fake player '$username' to receive $description. " +
+                "Events since $sinceIndex: ${buffer.snapshotSince(sinceIndex)}",
+        )
     }
 
     fun awaitChatContaining(
@@ -286,6 +423,10 @@ class FakePlayerClient(
         }
         chatMessages.clear()
         receivedItems.clear()
+        sounds.clear()
+        stoppedSounds.clear()
+        openedScreens.clear()
+        containerStateIds.clear()
     }
 
     private companion object {

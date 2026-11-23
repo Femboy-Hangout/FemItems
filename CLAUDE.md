@@ -11,4 +11,5 @@ Follow [AGENTS.md](AGENTS.md) as the canonical engineering guide for this reposi
 - **Mandatory Live Paper + Folia Fake-Player Testing on Every Change:**
   1. Add/update unit tests (`src/test/kotlin/dev/femitems/plugin/`) and live fake-player assertions (`src/test/kotlin/dev/femitems/plugin/live/LiveServerFakePlayerIT.kt`) for every changed or new feature.
   2. Run `./mvnw -B clean verify -P live-test` (Windows: `.\mvnw.cmd -B clean verify -P live-test`) to build the shaded JAR, run JUnit 5 unit tests, and test live plugin functionality with headless MCProtocolLib fake players on **both Paper 26.3 and Folia 26.3**.
+- **Offline Fake-Player Testing Procedure (standard):** Test every player-facing feature by having offline-mode fake players perform the real actions (commands, right-clicks, placing/breaking blocks, GUI clicks) and asserting on what their client receives; the console is only for setup. See AGENTS.md section 5.
 - **CI/CD:** Every GitHub push builds and uploads the JAR artifact via `.github/workflows/build.yml`, runs unit + live Paper/Folia fake-player tests, and auto-creates a GitHub Release when a new version is pushed to `main`.
