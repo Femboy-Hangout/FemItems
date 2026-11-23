@@ -45,20 +45,31 @@ case "$PLATFORM" in
     ;;
 esac
 
+for tool in curl sha256sum java; do
+  if ! command -v "$tool" >/dev/null 2>&1; then
+    echo "Required tool '$tool' was not found on PATH." >&2
+    exit 1
+  fi
+done
+
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 USER_AGENT="FemItems-DevServer/1.0 (https://github.com/Femboy-Hangout/FemItems)"
 
 get_project_version() {
-  python3 - "$REPO_ROOT/pom.xml" <<'PY'
-import sys, xml.etree.ElementTree as ET
-tree = ET.parse(sys.argv[1])
-root = tree.getroot()
-ns = {"m": "http://maven.apache.org/POM/4.0.0"}
-ver = root.find("m:version", ns)
-if ver is None:
-    ver = root.find("version")
-print(ver.text.strip())
-PY
+  # The project's own <version> is the first one in pom.xml (it has no <parent>).
+  sed -n 's:.*<version>\([^<]*\)</version>.*:\1:p' "$REPO_ROOT/pom.xml" | head -n 1 | tr -d '[:space:]'
+}
+
+# Prints the first "field": "value" string after the "server:default" download entry of a Fill API reply.
+json_download_field() {
+  local json="$1" field="$2"
+  printf '%s' "${json#*\"server:default\"}" | tr -d '\r\n' \
+    | grep -o "\"${field}\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" | head -n 1 \
+    | sed 's/.*:[[:space:]]*"\([^"]*\)"/\1/'
+}
+
+sha256_of() {
+  sha256sum "$1" | awk '{print tolower($1)}'
 }
 
 ensure_server_jar() {
@@ -72,26 +83,20 @@ ensure_server_jar() {
   local json
   json="$(curl -fsSL -H "User-Agent: $USER_AGENT" "$api_url")"
 
-  local meta
-  meta="$(printf '%s' "$json" | python3 -c '
-import json, sys
-data = json.load(sys.stdin)
-dl = data["downloads"]["server:default"]
-print(dl["name"])
-print(dl["url"])
-print(dl["checksums"]["sha256"].lower())
-')"
-
   local jar_name jar_url expected_sha
-  jar_name="$(printf '%s\n' "$meta" | sed -n '1p')"
-  jar_url="$(printf '%s\n' "$meta" | sed -n '2p')"
-  expected_sha="$(printf '%s\n' "$meta" | sed -n '3p')"
+  jar_name="$(json_download_field "$json" name)"
+  jar_url="$(json_download_field "$json" url)"
+  expected_sha="$(json_download_field "$json" sha256 | tr '[:upper:]' '[:lower:]')"
+  if [[ -z "$jar_name" || -z "$jar_url" || -z "$expected_sha" ]]; then
+    echo "[$target_platform] Could not locate the server:default download in the Fill API response." >&2
+    exit 1
+  fi
   local jar_path="${cache_dir}/${jar_name}"
 
-  if [[ ! -f "$jar_path" ]] || [[ "$(sha256sum "$jar_path" | awk '{print tolower($1)}')" != "$expected_sha" ]]; then
+  if [[ ! -f "$jar_path" ]] || [[ "$(sha256_of "$jar_path")" != "$expected_sha" ]]; then
     echo "[$target_platform] Downloading $jar_name..." >&2
     curl -fsSL -H "User-Agent: $USER_AGENT" -o "$jar_path" "$jar_url"
-    if [[ "$(sha256sum "$jar_path" | awk '{print tolower($1)}')" != "$expected_sha" ]]; then
+    if [[ "$(sha256_of "$jar_path")" != "$expected_sha" ]]; then
       rm -f "$jar_path"
       echo "[$target_platform] SHA-256 verification failed for $jar_name" >&2
       exit 1
@@ -110,6 +115,10 @@ if [[ "$SKIP_BUILD" != "true" ]]; then
 fi
 
 PLUGIN_VERSION="$(get_project_version)"
+if [[ -z "$PLUGIN_VERSION" ]]; then
+  echo "Could not read the project version from pom.xml" >&2
+  exit 1
+fi
 PLUGIN_JAR="${REPO_ROOT}/target/femitems-${PLUGIN_VERSION}.jar"
 if [[ ! -f "$PLUGIN_JAR" ]]; then
   echo "Built plugin JAR not found at $PLUGIN_JAR" >&2
