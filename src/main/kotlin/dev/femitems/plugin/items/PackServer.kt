@@ -57,7 +57,9 @@ data class ResourcePackSettings(
             val selfHost = config.getConfigurationSection("self-host")
             // 2.2.0 configs had enabled/port/public-url at the top level and always self-hosted.
             val legacySelfHost = !config.contains("mode") && (config.contains("port") || config.contains("public-url"))
+            // YAML 1.1 reads an unquoted `off`/`no` as the boolean false, so `mode: off` arrives as "false".
             val modeName = config.getString("mode")?.trim()?.lowercase(Locale.ROOT)
+                ?.let { if (it == "false" || it == "no") PackMode.OFF.configName else it }
             val mode = when {
                 !config.getBoolean("enabled", true) -> PackMode.OFF
                 modeName != null -> PackMode.entries.firstOrNull { it.configName == modeName }

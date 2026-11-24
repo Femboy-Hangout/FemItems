@@ -242,6 +242,17 @@ class CustomItemsTest {
     }
 
     @Test
+    fun `mode off written as plain yaml is read as off, not rejected`() {
+        // YAML 1.1 turns unquoted off/no into the boolean false; that used to reject the whole config.yml.
+        for (text in listOf("mode: off", "mode: no", "mode: false", "mode: \"off\"", "mode: OFF")) {
+            val section = YamlConfiguration().apply { loadFromString(text) }
+            assertEquals(PackMode.OFF, ResourcePackSettings.from(section).mode, "for '$text'")
+        }
+        val external = YamlConfiguration().apply { loadFromString("mode: external\nurl: https://x/p.zip") }
+        assertEquals(PackMode.EXTERNAL, ResourcePackSettings.from(external).mode)
+    }
+
+    @Test
     fun `uploaded pack is verified by downloading it and comparing sha1`() {
         val pack = BuiltResourcePack("current pack".toByteArray())
         val served = java.util.concurrent.atomic.AtomicReference("current pack".toByteArray())

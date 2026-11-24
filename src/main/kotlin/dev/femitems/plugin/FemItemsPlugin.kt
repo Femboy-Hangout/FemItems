@@ -303,7 +303,13 @@ class FemItemsPlugin : JavaPlugin(), Listener {
         return try {
             val newConfig = YamlConfiguration()
             newConfig.load(configFile)
-            val settings = ResourcePackSettings.from(newConfig.getConfigurationSection("resource-pack"))
+            // A bad resource-pack setting must never stop items, recipes and drops from loading.
+            val settings = try {
+                ResourcePackSettings.from(newConfig.getConfigurationSection("resource-pack"))
+            } catch (exception: IllegalArgumentException) {
+                logger.severe("config.yml resource-pack: ${exception.message}. The pack will not be sent until this is fixed; items, recipes and drops still load.")
+                ResourcePackSettings(mode = dev.femitems.plugin.items.PackMode.OFF)
+            }
             val items = customItems.load(settings)
             val parsed = ConfigParser.parse(
                 newConfig,

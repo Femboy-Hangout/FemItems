@@ -872,6 +872,23 @@ class LiveServerFakePlayerIT {
         op.awaitChatContaining("[FemItems] Config reloaded.", sinceIndex = opChatBeforeSelf)
         assertOffered(op, opPacksSelf, urlContains = ":$selfHostPort/")
 
+        // C2f. Plain `mode: off` (YAML reads it as false) must load everything and send no pack. This exact
+        //      config once made the server reject all of config.yml, so no custom items loaded at all.
+        writeConfig("mode: off")
+        val opPacksOff = op.offeredPackCount()
+        val opChatBeforeOff = op.chatCount()
+        op.sendCommand("femitems reload")
+        op.awaitChatContaining("[FemItems] Config reloaded. (1 mob rules, 2 recipes, 4 custom items)", sinceIndex = opChatBeforeOff)
+        Thread.sleep(1500)
+        assertEquals(opPacksOff, op.offeredPackCount(), "[$platform] mode: off still sent a pack")
+
+        // C2g. A broken resource-pack setting must never stop items, recipes and drops from loading.
+        writeConfig("mode: cloud")
+        val opChatBeforeBad = op.chatCount()
+        op.sendCommand("femitems reload")
+        op.awaitChatContaining("[FemItems] Config reloaded. (1 mob rules, 2 recipes, 4 custom items)", sinceIndex = opChatBeforeBad)
+        writeConfig("mode: off")
+
         // C3. Listing and giving custom items; a non-op cannot give.
         val opChatBeforeList = op.chatCount()
         op.sendCommand("femitems items")
