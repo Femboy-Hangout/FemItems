@@ -731,10 +731,12 @@ class LiveServerFakePlayerIT {
                 name: "&cRuby"
                 material: PAPER
                 texture: item/ruby
+                category: Gems
               raw_ruby:
                 name: "Raw Ruby"
                 material: PAPER
                 texture: item/raw_ruby
+                category: gems
               ruby_sword:
                 name: "&cRuby Sword"
                 material: DIAMOND_SWORD
@@ -1005,6 +1007,40 @@ class LiveServerFakePlayerIT {
         assertEquals(88f, hit.health, "[$platform] Ruby sword hit did not deal its configured 12 damage")
         op.sendCommand("kill @e[type=minecraft:pig,distance=..10]")
         op.selectHotbarSlot(0)
+
+        // C9. /femitems browse: categories (automatic Weapons/Armor, then the custom "Gems" whose two spellings
+        // merge), open one, take an item by clicking, and go back.
+        var browseScreens = op.openedScreenCount()
+        val slotsBeforeBrowse = op.slotUpdateCount()
+        op.sendCommand("femitems browse")
+        val home = op.awaitScreenTitleContaining("Custom items", sinceIndex = browseScreens)
+        assertEquals("Custom items", home.title)
+        fun browserSlot(screen: OpenedScreen, slot: Int, pattern: Regex, since: Int) =
+            op.awaitSlotUpdate("browser slot $slot matching $pattern", sinceIndex = since) { update ->
+                update.containerId == screen.id && update.slot == slot && pattern.containsMatchIn(update.item?.dataComponentsPatch?.toString().orEmpty())
+            }
+        val ruby = Regex("""livetest:ruby(?![_a-z])""")
+        browserSlot(home, 0, Regex("livetest:ruby_sword"), slotsBeforeBrowse)
+        browserSlot(home, 1, Regex("livetest:ruby_helmet"), slotsBeforeBrowse)
+        browserSlot(home, 2, ruby, slotsBeforeBrowse) // the Gems icon is its first item
+        browseScreens = op.openedScreenCount()
+        val slotsBeforeGems = op.slotUpdateCount()
+        op.clickContainerSlot(home, 2)
+        val gems = op.awaitScreenTitleContaining("Custom items • Gems", sinceIndex = browseScreens)
+        browserSlot(gems, 0, ruby, slotsBeforeGems)
+        browserSlot(gems, 1, Regex("livetest:raw_ruby"), slotsBeforeGems)
+        val opChatBeforeTake = op.chatCount()
+        val opItemsBeforeTake = op.receivedItemCount()
+        op.clickContainerSlot(gems, 1)
+        op.awaitChatContaining("[FemItems] Gave 1x livetest:raw_ruby to FakeOp.", sinceIndex = opChatBeforeTake)
+        op.awaitItemMatching("raw ruby taken from the browser", sinceIndex = opItemsBeforeTake) { item ->
+            item.dataComponentsPatch?.toString().orEmpty().contains("livetest:raw_ruby")
+        }
+        browseScreens = op.openedScreenCount()
+        op.clickContainerSlot(gems, 45) // back
+        val backHome = op.awaitScreenTitleContaining("Custom items", sinceIndex = browseScreens)
+        assertEquals("Custom items", backHome.title)
+        op.closeContainer(backHome)
     }
 
     /**

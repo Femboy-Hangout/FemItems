@@ -482,4 +482,56 @@ class CustomItemsTest {
         )
         assertEquals("[FemItems] Gave 2x ns:sword to Lucy.", plain.serialize(Messages.gaveCustomItem(2, "ns:sword", "Lucy")))
     }
+
+    // ------------------------------------------------------------------ item browser
+
+    @Test
+    fun `browser groups items automatically and by custom category, in a stable order`(@TempDir contents: Path) {
+        pack(
+            contents, "ns",
+            """
+            items:
+              ingot: { material: PAPER, texture: t }
+              gem: { material: PAPER, texture: t, category: Gems }
+              blade: { material: NETHERITE_SWORD, texture: t }
+              axe: { material: NETHERITE_AXE, texture: t }
+              war_axe: { material: NETHERITE_AXE, texture: t, category: weapons }
+              helmet: { material: NETHERITE_HELMET, texture: t }
+              hat: { material: PAPER, texture: t, slot: head }
+              shard: { material: PAPER, texture: t, category: gems }
+              bow: { material: BOW, texture: t }
+            """,
+            "t",
+        )
+        val categories = ItemCategories.group(loader(contents).load().single().items)
+        assertEquals(
+            listOf(
+                ItemCategory("Weapons", listOf("ns:blade", "ns:war_axe", "ns:bow")),
+                ItemCategory("Tools", listOf("ns:axe")),
+                ItemCategory("Armor", listOf("ns:helmet", "ns:hat")),
+                ItemCategory("Gems", listOf("ns:gem", "ns:shard")),
+                ItemCategory("Other", listOf("ns:ingot")),
+            ),
+            categories,
+            "fixed categories first, then custom ones (case-insensitive, first spelling wins), Other last",
+        )
+    }
+
+    @Test
+    fun `browser pages hold 45 items`() {
+        val ids = (1..100).map { "ns:item$it" }
+        assertEquals(3, ItemCategories.pageCount(ids.size))
+        assertEquals(1, ItemCategories.pageCount(0))
+        assertEquals((1..45).map { "ns:item$it" }, ItemCategories.page(ids, 0))
+        assertEquals((91..100).map { "ns:item$it" }, ItemCategories.page(ids, 2))
+        assertEquals(ItemCategories.page(ids, 2), ItemCategories.page(ids, 99), "out-of-range pages clamp to the last")
+        assertEquals(ItemCategories.page(ids, 0), ItemCategories.page(ids, -1))
+    }
+
+    @Test
+    fun `category option is validated`(@TempDir root: Path) {
+        val contents = root.resolve("c")
+        pack(contents, "ns", "items:\n  a:\n    material: PAPER\n    texture: t\n    category: ${"x".repeat(33)}\n", "t")
+        assertContains(assertFailsWith<ContentPackException> { loader(contents).load() }.message!!, "category must be at most 32 characters")
+    }
 }

@@ -28,6 +28,7 @@ All commands require `femitems.reload` (operators by default). `/femi` is an ali
 | `/femitems reload` | Reloads `config.yml`. On success it reports the loaded counts; on failure it reports the line number, and hovering the message shows the exact error. A failed reload leaves the previous config fully active. |
 | `/femitems debug` | Toggles mob-death diagnostics in the console. |
 | `/femitems items` | Lists all custom item IDs. |
+| `/femitems browse` | Opens a GUI of all custom items by category. With `femitems.give`, click an item to take one (shift-click for a stack). |
 | `/femitems stats` | Shows the sizes of FemItems' internal per-player stores (playbacks, bossbars, volumes, shuffle, listeners) plus custom item and recipe counts; useful to confirm nothing grows over time. |
 | `/femitems pack` | Shows the custom item resource pack status and re-checks the uploaded copy (after uploading a new version). |
 | `/femitems give <player> <namespace:item> [amount]` | Gives a custom item. Requires `femitems.give` (operators by default). |
@@ -124,7 +125,7 @@ items:
 
 It also chooses the slot: `mainhand`, `offhand`, `hand`, `head`, `chest`, `legs`, `feet`, `armor`, `body` or `any`. Changing stats or attributes doesn't touch the resource pack, so there's nothing to re-upload. Run `/femitems reload`. Items people already have keep their old stats; newly given, crafted or dropped ones get the new values.
 
-Other item options: `unbreakable: true`, `max-stack-size: 1-99` (not with durability), and `slot: head|chest|legs|feet` for wearables that are not armour. A misspelt option (for example `damage:` instead of `attack-damage:`) is reported on reload with a suggestion, rather than silently ignored.
+Other item options: `unbreakable: true`, `max-stack-size: 1-99` (not with durability), `slot: head|chest|legs|feet` for wearables that are not armour, and `category: <name>` to group the item in `/femitems browse`. Without `category`, items are sorted into Weapons, Tools, Armor or Other by their material. A misspelt option (for example `damage:` instead of `attack-damage:`) is reported on reload with a suggestion, rather than silently ignored.
 
 ### Using custom items in recipes and drops
 

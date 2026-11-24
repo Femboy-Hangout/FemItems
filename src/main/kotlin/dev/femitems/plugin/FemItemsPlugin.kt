@@ -5,6 +5,7 @@ import com.mojang.brigadier.arguments.IntegerArgumentType
 import com.mojang.brigadier.arguments.StringArgumentType
 import dev.femitems.plugin.items.ContentPackException
 import dev.femitems.plugin.items.CustomItemService
+import dev.femitems.plugin.items.ItemBrowser
 import dev.femitems.plugin.items.LoadedItems
 import dev.femitems.plugin.items.ResourcePackSettings
 import io.papermc.paper.command.brigadier.argument.ArgumentTypes
@@ -69,6 +70,9 @@ class FemItemsPlugin : JavaPlugin(), Listener {
     /** ItemsAdder-style custom items with their own textures, from `contents/<namespace>/`. */
     private val customItems = CustomItemService(this)
 
+    /** `/femitems browse`: the custom item GUI, by category. */
+    private val itemBrowser = ItemBrowser(this, customItems)
+
     /** NBS music & Custom Jukebox feature (formerly the standalone FemJukebox plugin). */
     private var jukebox: JukeboxFeature? = null
 
@@ -76,6 +80,7 @@ class FemItemsPlugin : JavaPlugin(), Listener {
         saveDefaultConfig()
         server.pluginManager.registerEvents(this, this)
         server.pluginManager.registerEvents(customItems, this)
+        server.pluginManager.registerEvents(itemBrowser, this)
 
         val platform = if (isFolia()) "Folia" else "Paper"
         logger.info("Initializing FemItems ${pluginMeta.version} on $platform.")
@@ -170,6 +175,17 @@ class FemItemsPlugin : JavaPlugin(), Listener {
             .then(
                 Commands.literal("items").executes { context ->
                     context.source.sender.sendMessage(Messages.customItems(customItems.current.definitions.keys.toList()))
+                    Command.SINGLE_SUCCESS
+                },
+            )
+            .then(
+                Commands.literal("browse").executes { context ->
+                    val player = context.source.executor as? Player ?: context.source.sender as? Player
+                    if (player == null) {
+                        context.source.sender.sendMessage(Messages.playersOnly())
+                        return@executes 0
+                    }
+                    player.scheduler.run(this, { itemBrowser.openHome(player) }, null)
                     Command.SINGLE_SUCCESS
                 },
             )

@@ -55,6 +55,9 @@ object Messages {
         Placeholder.unparsed("target", target),
     )
 
+    fun playersOnly(): Component =
+        render("<color:$ERROR>Only players can open the item browser.</color>")
+
     fun reloadInProgress(): Component =
         render("<color:$MUTED>A reload is already in progress; please wait.</color>")
 
@@ -121,6 +124,7 @@ object Messages {
             .append(header)
             .append(Component.newline()).append(stats)
             .append(Component.newline()).append(commandLine("/femitems reload", "reload config.yml"))
+            .append(Component.newline()).append(commandLine("/femitems browse", "browse custom items by category"))
             .append(Component.newline()).append(commandLine("/femitems debug", "toggle mob-death diagnostics"))
             .build()
     }

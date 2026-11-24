@@ -82,6 +82,8 @@ data class CustomItemDefinition(
     val attributes: List<AttributeSpec>,
     /** Headline stats replacing the base item's own values (see [ItemStat]). */
     val stats: Map<ItemStat, Double> = emptyMap(),
+    /** Browser category (`/femitems browse`); null = automatic from the material (see [ItemCategories]). */
+    val category: String? = null,
     /** Equipment asset id (`namespace:name`) giving the worn texture, for armour. */
     val equipment: String?,
     val armorSlot: ArmorSlot?,
@@ -247,6 +249,9 @@ class ContentPackLoader(
             enchants = enchants,
             attributes = attributes,
             stats = stats,
+            category = section.getString("category")?.trim()?.takeIf(String::isNotEmpty)?.also {
+                if (it.length > 32) throw ContentPackException(file, "$where.category must be at most 32 characters")
+            },
             equipment = equipment,
             armorSlot = armorSlot,
         )
@@ -317,7 +322,7 @@ class ContentPackLoader(
         /** Every option an item section may have; anything else is a typo and is reported. */
         val ITEM_OPTIONS: List<String> = listOf(
             "name", "lore", "material", "texture", "model", "max-durability", "max-stack-size", "unbreakable",
-            "enchants", "attributes", "equipment", "slot",
+            "enchants", "attributes", "equipment", "slot", "category",
         ) + ItemStat.entries.map(ItemStat::configName)
         private val OPTION_HINTS = mapOf(
             "damage" to "attack-damage", "attack_damage" to "attack-damage", "attack-dmg" to "attack-damage",
