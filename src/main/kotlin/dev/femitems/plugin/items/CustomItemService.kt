@@ -1,6 +1,8 @@
 package dev.femitems.plugin.items
 
 import dev.femitems.plugin.Messages
+import io.papermc.paper.datacomponent.DataComponentTypes
+import io.papermc.paper.datacomponent.item.ItemAttributeModifiers
 import io.papermc.paper.registry.RegistryAccess
 import io.papermc.paper.registry.RegistryKey
 import net.kyori.adventure.resource.ResourcePackInfo
@@ -222,18 +224,6 @@ class CustomItemService(private val plugin: JavaPlugin) : Listener {
                     else meta.addEnchant(enchantment, level, true)
                 }
             }
-            if (definition.attributes.isNotEmpty()) {
-                val registry = RegistryAccess.registryAccess().getRegistry(RegistryKey.ATTRIBUTE)
-                val slotGroup = definition.armorSlot?.let(::slotGroup) ?: EquipmentSlotGroup.MAINHAND
-                for (spec in definition.attributes) {
-                    val attribute = registry.get(spec.attribute) ?: continue
-                    val modifierKey = NamespacedKey(plugin, "${definition.namespace}.${definition.key}.${spec.attribute.key}")
-                    meta.addAttributeModifier(
-                        attribute,
-                        AttributeModifier(modifierKey, spec.amount, AttributeModifier.Operation.ADD_NUMBER, slotGroup),
-                    )
-                }
-            }
             val equipment = definition.equipment
             val slot = definition.armorSlot
             if (equipment != null && slot != null) {
@@ -243,7 +233,45 @@ class CustomItemService(private val plugin: JavaPlugin) : Listener {
                 meta.setEquippable(equippable)
             }
         }
+        applyAttributes(item, definition)
         return item
+    }
+
+    /**
+     * Starts from the base item's own modifiers (a diamond sword's 7 damage / 1.6 speed, a helmet's armour),
+     * replaces those whose attribute has a headline stat, then adds the extra `attributes` on top.
+     * Uses the data component directly: ItemMeta modifiers would silently drop every default.
+     */
+    @Suppress("UnstableApiUsage")
+    private fun applyAttributes(item: ItemStack, definition: CustomItemDefinition) {
+        if (definition.stats.isEmpty() && definition.attributes.isEmpty()) return
+        val registry = RegistryAccess.registryAccess().getRegistry(RegistryKey.ATTRIBUTE)
+        val naturalGroup = definition.armorSlot?.let(::slotGroup) ?: EquipmentSlotGroup.MAINHAND
+        val defaults = item.getData(DataComponentTypes.ATTRIBUTE_MODIFIERS)?.modifiers().orEmpty()
+        val statAttributes = definition.stats.keys.mapNotNull { registry.get(NamespacedKey.minecraft(it.attribute)) }.toSet()
+        val builder = ItemAttributeModifiers.itemAttributes()
+        for (entry in defaults) {
+            if (entry.attribute() !in statAttributes) builder.addModifier(entry.attribute(), entry.modifier(), entry.group, entry.display())
+        }
+        for ((stat, value) in definition.stats) {
+            val attribute = registry.get(NamespacedKey.minecraft(stat.attribute)) ?: continue
+            val original = defaults.firstOrNull { it.attribute() == attribute }
+            // Vanilla's own ids make the tooltip show the total ("12 Attack Damage") like a normal weapon.
+            val key = when (stat) {
+                ItemStat.ATTACK_DAMAGE -> NamespacedKey.minecraft("base_attack_damage")
+                ItemStat.ATTACK_SPEED -> NamespacedKey.minecraft("base_attack_speed")
+                else -> original?.modifier()?.key ?: NamespacedKey(plugin, "${definition.namespace}.${definition.key}.${stat.attribute}")
+            }
+            val group = original?.group ?: naturalGroup
+            builder.addModifier(attribute, AttributeModifier(key, stat.modifierAmount(value), AttributeModifier.Operation.ADD_NUMBER, group), group)
+        }
+        for (spec in definition.attributes) {
+            val attribute = registry.get(spec.attribute) ?: continue
+            val group = spec.slot?.let(EquipmentSlotGroup::getByName) ?: naturalGroup
+            val modifierKey = NamespacedKey(plugin, "${definition.namespace}.${definition.key}.${spec.attribute.key}")
+            builder.addModifier(attribute, AttributeModifier(modifierKey, spec.amount, operation(spec.operation), group), group)
+        }
+        item.setData(DataComponentTypes.ATTRIBUTE_MODIFIERS, builder.build())
     }
 
     private fun enchantmentExists(key: NamespacedKey): Boolean =
@@ -265,6 +293,12 @@ class CustomItemService(private val plugin: JavaPlugin) : Listener {
             ArmorSlot.CHEST -> EquipmentSlot.CHEST
             ArmorSlot.LEGS -> EquipmentSlot.LEGS
             ArmorSlot.FEET -> EquipmentSlot.FEET
+        }
+
+        private fun operation(operation: ModifierOperation): AttributeModifier.Operation = when (operation) {
+            ModifierOperation.ADD -> AttributeModifier.Operation.ADD_NUMBER
+            ModifierOperation.MULTIPLY_BASE -> AttributeModifier.Operation.ADD_SCALAR
+            ModifierOperation.MULTIPLY_TOTAL -> AttributeModifier.Operation.MULTIPLY_SCALAR_1
         }
 
         private fun slotGroup(slot: ArmorSlot): EquipmentSlotGroup = when (slot) {

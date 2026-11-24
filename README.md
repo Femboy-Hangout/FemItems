@@ -96,6 +96,11 @@ items:
     texture: item/platinum_sword
     max-durability: 1800         # optional: custom durability
     enchants: { sharpness: 2 }   # optional
+    attack-damage: 12            # optional: total damage, as the tooltip shows it (diamond sword: 7)
+    attack-speed: 1.8            # optional: attacks per second (diamond sword: 1.6)
+    attributes:                  # optional: extra bonuses while held, on top of the stats above
+      max_health: 4              # +2 hearts
+      movement_speed: { amount: 0.1, operation: multiply_base }   # +10% speed
     # model: handheld            # optional: handheld (tools/weapons, the default for them) or generated
 
   platinum_helmet:
@@ -104,12 +109,22 @@ items:
     texture: item/platinum_helmet
     max-durability: 468
     equipment: platinum          # worn texture; the slot comes from the material (or set slot: head)
-    attributes:                  # optional; replaces the base item's attributes (armour, damage...)
-      armor: 3
-      armor_toughness: 3
+    armor: 4                     # optional: armour points (diamond helmet: 3)
+    armor-toughness: 3           # optional (diamond: 2)
+    knockback-resistance: 0.1    # optional: 0 to 1
 ```
 
-Other item options: `unbreakable: true`, `max-stack-size: 1-99` (not with durability), and `slot: head|chest|legs|feet` for wearables that are not armour. `attributes` takes any attribute (`attack_damage`, `attack_speed`, `movement_speed`, ...); amounts are added to the player's base value, and setting any attribute replaces all of the base item's default attributes.
+**Stats.** `attack-damage`, `attack-speed`, `armor`, `armor-toughness` and `knockback-resistance` set the total the item's tooltip shows and replace the base item's own value. Stats you leave out keep the base item's value, so a `DIAMOND_SWORD` with only `attack-damage: 12` still swings at 1.6.
+
+**Attributes.** `attributes` adds any vanilla attribute (`max_health`, `movement_speed`, `luck`, `attack_knockback`, `block_interaction_range`, `scale`, ...) on top of the base item's stats. The short form `max_health: 4` adds 4 while the item is held, or worn for armour. The long form `{ amount: 0.1, operation: multiply_base, slot: any }` chooses the operation:
+
+- `add`: the default
+- `multiply_base`: +10% of the base value for 0.1
+- `multiply_total`
+
+It also chooses the slot: `mainhand`, `offhand`, `hand`, `head`, `chest`, `legs`, `feet`, `armor`, `body` or `any`. Changing stats or attributes doesn't touch the resource pack, so there's nothing to re-upload. Run `/femitems reload`. Items people already have keep their old stats; newly given, crafted or dropped ones get the new values.
+
+Other item options: `unbreakable: true`, `max-stack-size: 1-99` (not with durability), and `slot: head|chest|legs|feet` for wearables that are not armour. A misspelt option (for example `damage:` instead of `attack-damage:`) is reported on reload with a suggestion, rather than silently ignored.
 
 ### Using custom items in recipes and drops
 

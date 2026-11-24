@@ -13,6 +13,13 @@ import org.geysermc.mcprotocollib.protocol.data.game.ResourcePackStatus
 import org.geysermc.mcprotocollib.protocol.packet.common.clientbound.ClientboundResourcePackPushPacket
 import org.geysermc.mcprotocollib.protocol.packet.common.serverbound.ServerboundResourcePackPacket
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.ClientboundSetEquipmentPacket
+import org.geysermc.mcprotocollib.protocol.data.game.entity.attribute.Attribute
+import org.geysermc.mcprotocollib.protocol.data.game.entity.attribute.ModifierOperation
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.ClientboundAddEntityPacket
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.ClientboundSetEntityDataPacket
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.ClientboundUpdateAttributesPacket
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundAttackPacket
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundSetCarriedItemPacket
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundUseItemPacket
 import org.geysermc.mcprotocollib.protocol.data.game.entity.`object`.Direction
 import org.geysermc.mcprotocollib.protocol.data.game.entity.player.Hand
@@ -72,6 +79,23 @@ data class CapturedSound(val name: String, val volume: Float, val pitch: Float)
 
 /** A container screen the server opened on the client. [id] is needed to click its slots. */
 data class OpenedScreen(val id: Int, val title: String)
+
+/** An entity that appeared for this client; [type] is MCProtocolLib's EntityType name (e.g. `PIG`). */
+data class SpawnedEntity(val id: Int, val type: String)
+
+/** A health value the server synced for a living entity. */
+data class EntityHealth(val entityId: Int, val health: Float)
+
+/** The attribute's effective value, computed from its base and modifiers exactly as the vanilla client does. */
+internal fun attributeValue(attribute: Attribute): Double {
+    val modifiers = attribute.modifiers
+    var base = attribute.value
+    for (modifier in modifiers) if (modifier.operation == ModifierOperation.ADD) base += modifier.amount
+    var total = base
+    for (modifier in modifiers) if (modifier.operation == ModifierOperation.ADD_MULTIPLIED_BASE) total += base * modifier.amount
+    for (modifier in modifiers) if (modifier.operation == ModifierOperation.ADD_MULTIPLIED_TOTAL) total *= 1.0 + modifier.amount
+    return total
+}
 
 internal class BoundedEventBuffer<T>(private val capacity: Int) {
     private val entries = ArrayDeque<T>()
@@ -135,6 +159,11 @@ class FakePlayerClient(
     private val slotUpdates = BoundedEventBuffer<SlotUpdate>(MAX_CAPTURED_EVENTS)
     private val seenEquipment = BoundedEventBuffer<String>(MAX_CAPTURED_EVENTS)
     private val blockSequence = AtomicInteger(0)
+    private val ownEntityId = AtomicInteger(-1)
+    /** This player's own attribute values (e.g. `minecraft:armor`), computed from base + modifiers like the client does. */
+    private val ownAttributes = ConcurrentHashMap<String, Double>()
+    private val spawnedEntities = BoundedEventBuffer<SpawnedEntity>(MAX_CAPTURED_EVENTS)
+    private val entityHealth = BoundedEventBuffer<EntityHealth>(MAX_CAPTURED_EVENTS)
 
     private var session: ClientNetworkSession? = null
 
@@ -149,6 +178,7 @@ class FakePlayerClient(
             override fun packetReceived(session: Session, packet: Packet) {
                 when (packet) {
                     is ClientboundLoginPacket -> {
+                        ownEntityId.set(packet.entityId)
                         session.send(
                             ServerboundClientInformationPacket(
                                 "en_US",
@@ -187,6 +217,18 @@ class FakePlayerClient(
                     // Sent once per server-wide recipe/resource resync (PlayerList.reloadResources),
                     // which also re-reads and re-sends every player's advancements. Expensive.
                     is ClientboundUpdateRecipesPacket -> recipeResyncs.incrementAndGet()
+
+                    is ClientboundUpdateAttributesPacket -> if (packet.entityId == ownEntityId.get()) {
+                        for (attribute in packet.attributes) ownAttributes[attribute.type.identifier.asString()] = attributeValue(attribute)
+                    }
+
+                    is ClientboundAddEntityPacket -> spawnedEntities.add(SpawnedEntity(packet.entityId, packet.type.name))
+
+                    // Living entities sync their health to every viewer (metadata index 9).
+                    is ClientboundSetEntityDataPacket -> for (data in packet.metadata) {
+                        val health = data.value
+                        if (data.id == 9 && health is Float) entityHealth.add(EntityHealth(packet.entityId, health))
+                    }
 
                     is ClientboundSystemChatPacket -> {
                         val plain = PlainTextComponentSerializer.plainText().serialize(packet.content)
@@ -373,6 +415,40 @@ class FakePlayerClient(
         check(active.isConnected) { "Fake player '$username' disconnected: ${disconnectReason.get()}" }
         active.send(packet)
     }
+
+    /** Selects hotbar slot [slot] (0-8), like scrolling or pressing a number key. */
+    fun selectHotbarSlot(slot: Int) {
+        send(ServerboundSetCarriedItemPacket(slot))
+    }
+
+    /** Left-clicks (attacks) the entity with network id [entityId] using the held item. */
+    fun attack(entityId: Int) {
+        send(ServerboundAttackPacket(entityId))
+    }
+
+    /** Waits until this player's own [attribute] (e.g. `minecraft:armor`) is [expected], as the client computes it. */
+    fun awaitOwnAttribute(attribute: String, expected: Double, timeout: Duration = Duration.ofSeconds(15)) {
+        val deadline = Instant.now().plus(timeout)
+        while (Instant.now().isBefore(deadline)) {
+            val value = ownAttributes[attribute]
+            if (value != null && Math.abs(value - expected) < 1e-6) return
+            if (disconnectReason.get() != null) throw AssertionError("Fake player '$username' disconnected: ${disconnectReason.get()}")
+            Thread.sleep(50)
+        }
+        throw AssertionError("Fake player '$username': $attribute is ${ownAttributes[attribute]}, expected $expected. All: $ownAttributes")
+    }
+
+    fun spawnedEntityCount(): Int = spawnedEntities.count()
+
+    /** Waits for an entity of [type] (MCProtocolLib name, e.g. `PIG`) to appear for this client. */
+    fun awaitSpawnedEntity(type: String, sinceIndex: Int = 0, timeout: Duration = Duration.ofSeconds(15)): SpawnedEntity =
+        awaitEvent(spawnedEntities, "spawned $type", sinceIndex, timeout) { it.type == type }
+
+    fun entityHealthCount(): Int = entityHealth.count()
+
+    /** Waits for a health update of [entityId] matching [predicate]. */
+    fun awaitEntityHealth(entityId: Int, sinceIndex: Int = 0, timeout: Duration = Duration.ofSeconds(15), predicate: (Float) -> Boolean): EntityHealth =
+        awaitEvent(entityHealth, "health update of entity $entityId", sinceIndex, timeout) { it.entityId == entityId && predicate(it.health) }
 
     fun soundCount(): Int = sounds.count()
 

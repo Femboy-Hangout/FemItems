@@ -740,15 +740,20 @@ class LiveServerFakePlayerIT {
                 material: DIAMOND_SWORD
                 texture: item/ruby_sword
                 max-durability: 1800
+                attack-damage: 12
+                attack-speed: 2
+                attributes:
+                  max_health: 4
               ruby_helmet:
                 name: "&cRuby Helmet"
                 material: DIAMOND_HELMET
                 texture: item/ruby_helmet
                 max-durability: 468
                 equipment: ruby
+                armor: 5
                 attributes:
-                  armor: 3
-                  armor_toughness: 3
+                  armor_toughness: 1
+                  movement_speed: { amount: 0.5, operation: multiply_base }
             """.trimIndent() + "\n",
             StandardCharsets.UTF_8,
         )
@@ -948,6 +953,11 @@ class LiveServerFakePlayerIT {
                 update.item?.dataComponentsPatch?.toString().orEmpty().contains("livetest:ruby_helmet")
         }
         guest.awaitSeenEquipmentContaining("livetest:ruby", sinceIndex = guestEquipmentBefore)
+        // Worn stats reach the wearer: `armor: 5` replaces the diamond helmet's 3, while `attributes` add on top
+        // of its defaults (toughness 2 + 1) and a multiply_base modifier scales walking speed (0.1 * 1.5).
+        op.awaitOwnAttribute("minecraft:armor", 5.0)
+        op.awaitOwnAttribute("minecraft:armor_toughness", 3.0)
+        op.awaitOwnAttribute("minecraft:movement_speed", 0.15)
 
         // C6. Smelt custom raw ore into a custom ingot in a furnace, by clicking like a player.
         val opChatBeforeRaw = op.chatCount()
@@ -979,6 +989,22 @@ class LiveServerFakePlayerIT {
         op.awaitItemMatching("raw ruby dropped by the tagged zombie", sinceIndex = opItemsBeforeKill) { item ->
             item.dataComponentsPatch?.toString().orEmpty().contains("livetest:raw_ruby")
         }
+
+        // C8. Holding the crafted ruby sword (hotbar 1) applies its stats, and hitting a mob deals exactly
+        // `attack-damage: 12`, not the diamond sword's 7.
+        op.selectHotbarSlot(1)
+        op.awaitOwnAttribute("minecraft:attack_speed", 2.0)
+        op.awaitOwnAttribute("minecraft:max_health", 24.0)
+        val spawnsBeforePig = op.spawnedEntityCount()
+        op.sendCommand("""summon minecraft:pig 0.5 -60 2.5 {NoAI:1b,Silent:1b,Health:100f,attributes:[{id:"minecraft:max_health",base:100}]}""")
+        val pig = op.awaitSpawnedEntity("PIG", sinceIndex = spawnsBeforePig)
+        Thread.sleep(1500) // a full attack-cooldown charge after switching items
+        val healthBeforeHit = op.entityHealthCount()
+        op.attack(pig.id)
+        val hit = op.awaitEntityHealth(pig.id, sinceIndex = healthBeforeHit) { it < 100f }
+        assertEquals(88f, hit.health, "[$platform] Ruby sword hit did not deal its configured 12 damage")
+        op.sendCommand("kill @e[type=minecraft:pig,distance=..10]")
+        op.selectHotbarSlot(0)
     }
 
     /**

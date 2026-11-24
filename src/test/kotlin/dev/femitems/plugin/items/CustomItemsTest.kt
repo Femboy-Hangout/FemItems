@@ -25,7 +25,7 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class CustomItemsTest {
-    private val knownAttributes = setOf("armor", "armor_toughness", "attack_damage", "attack_speed")
+    private val knownAttributes = setOf("armor", "armor_toughness", "attack_damage", "attack_speed", "movement_speed", "max_health")
     private val knownEnchants = setOf("sharpness", "unbreaking")
 
     private fun loader(contents: Path) = ContentPackLoader(
@@ -111,6 +111,67 @@ class CustomItemsTest {
             helmet.attributes,
         )
         assertEquals(EquipmentDefinition("blossom_studios", "platinum", "armor/platinum_layer_1", "armor/platinum_layer_2"), pack.equipment.single())
+    }
+
+    @Test
+    fun `headline stats and detailed attributes are read`(@TempDir contents: Path) {
+        pack(
+            contents, "ns",
+            """
+            items:
+              blade:
+                material: DIAMOND_SWORD
+                texture: t
+                attack-damage: 12
+                attack-speed: "1.8"
+                attributes:
+                  movement_speed: { amount: 0.1, operation: multiply_base, slot: any }
+                  max_health: 4
+              cap:
+                material: DIAMOND_HELMET
+                texture: t
+                armor: 5
+                armor-toughness: 2.5
+                knockback-resistance: 0.1
+            """,
+            "t",
+        )
+        val items = loader(contents).load().single().items.associateBy(CustomItemDefinition::key)
+        val blade = items.getValue("blade")
+        assertEquals(mapOf(ItemStat.ATTACK_DAMAGE to 12.0, ItemStat.ATTACK_SPEED to 1.8), blade.stats)
+        assertEquals(11.0, ItemStat.ATTACK_DAMAGE.modifierAmount(12.0), "the player's base 1 damage is part of the shown total")
+        assertEquals(-2.2, ItemStat.ATTACK_SPEED.modifierAmount(1.8), 1e-9)
+        assertEquals(
+            listOf(
+                AttributeSpec(NamespacedKey.minecraft("movement_speed"), 0.1, ModifierOperation.MULTIPLY_BASE, "any"),
+                AttributeSpec(NamespacedKey.minecraft("max_health"), 4.0),
+            ),
+            blade.attributes,
+        )
+        assertEquals(
+            mapOf(ItemStat.ARMOR to 5.0, ItemStat.ARMOR_TOUGHNESS to 2.5, ItemStat.KNOCKBACK_RESISTANCE to 0.1),
+            items.getValue("cap").stats,
+        )
+        assertTrue(items.getValue("cap").attributes.isEmpty())
+    }
+
+    @Test
+    fun `stat and attribute mistakes are reported with a hint`(@TempDir root: Path) {
+        fun error(body: String): String {
+            val contents = root.resolve("c-${System.nanoTime()}")
+            pack(contents, "ns", "items:\n  a:\n    material: DIAMOND_SWORD\n    texture: t\n$body", "t")
+            return assertFailsWith<ContentPackException> { loader(contents).load() }.message!!
+        }
+        assertContains(error("    damage: 10\n"), "items.a.damage: unknown option (did you mean attack-damage?)")
+        assertContains(error("    sharpness: 2\n"), "unknown option (options: name, lore, material")
+        assertContains(error("    attack-damage: lots\n"), "attack-damage must be a number")
+        assertContains(error("    attack-damage: -1\n"), "attack-damage must be 0 to 2048")
+        assertContains(error("    attack-speed: 0\n"), "attack-speed must be 0.01 to 1024")
+        assertContains(error("    knockback-resistance: 2\n"), "knockback-resistance must be 0 to 1")
+        assertContains(error("    attributes:\n      armor: { amount: 1, operation: times }\n"), "operation must be add, multiply_base or multiply_total")
+        assertContains(error("    attributes:\n      armor: { amount: 1, slot: pocket }\n"), "slot must be one of mainhand")
+        assertContains(error("    attributes:\n      armor: { value: 1 }\n"), "attributes.armor.value: unknown option")
+        assertContains(error("    attributes:\n      armor: { operation: add }\n"), "attributes.armor.amount must be a number")
     }
 
     @Test

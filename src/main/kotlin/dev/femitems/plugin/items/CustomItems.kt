@@ -22,8 +22,44 @@ enum class ArmorSlot(val configName: String, val materialSuffix: String) {
     }
 }
 
-/** One attribute modifier (amount added to the base value) applied while the item is held or worn. */
-data class AttributeSpec(val attribute: NamespacedKey, val amount: Double)
+/** How an attribute modifier combines with the player's value (vanilla `add_value`, `add_multiplied_base`, `add_multiplied_total`). */
+enum class ModifierOperation(val configName: String) {
+    ADD("add"),
+    MULTIPLY_BASE("multiply_base"),
+    MULTIPLY_TOTAL("multiply_total");
+
+    companion object {
+        fun fromConfig(name: String): ModifierOperation? = entries.firstOrNull { it.configName == name.trim().lowercase(Locale.ROOT) }
+    }
+}
+
+/**
+ * One extra attribute modifier applied while the item is held or worn, on top of the base item's own
+ * stats. [slot] is a vanilla slot group name (`mainhand`, `head`, `armor`, `any`...); null means the
+ * item's natural slot (its armour slot, otherwise the main hand).
+ */
+data class AttributeSpec(
+    val attribute: NamespacedKey,
+    val amount: Double,
+    val operation: ModifierOperation = ModifierOperation.ADD,
+    val slot: String? = null,
+)
+
+/**
+ * Headline stats, written as the total the tooltip shows (`attack-damage: 12` = "12 Attack Damage").
+ * Each one replaces the base item's own value for that attribute. [playerBase] is the player's base
+ * value, which vanilla adds to the item modifier for display, so the modifier is `value - playerBase`.
+ */
+enum class ItemStat(val configName: String, val attribute: String, val playerBase: Double, val range: ClosedFloatingPointRange<Double>) {
+    ATTACK_DAMAGE("attack-damage", "attack_damage", 1.0, 0.0..2048.0),
+    ATTACK_SPEED("attack-speed", "attack_speed", 4.0, 0.01..1024.0),
+    ARMOR("armor", "armor", 0.0, 0.0..30.0),
+    ARMOR_TOUGHNESS("armor-toughness", "armor_toughness", 0.0, 0.0..20.0),
+    KNOCKBACK_RESISTANCE("knockback-resistance", "knockback_resistance", 0.0, 0.0..1.0);
+
+    /** The modifier amount that makes the tooltip and the player's value show exactly [value]. */
+    fun modifierAmount(value: Double): Double = value - playerBase
+}
 
 /**
  * A fully custom item: a vanilla [material] for behaviour/stats plus its own model and texture from the
@@ -44,6 +80,8 @@ data class CustomItemDefinition(
     val unbreakable: Boolean,
     val enchants: Map<NamespacedKey, Int>,
     val attributes: List<AttributeSpec>,
+    /** Headline stats replacing the base item's own values (see [ItemStat]). */
+    val stats: Map<ItemStat, Double> = emptyMap(),
     /** Equipment asset id (`namespace:name`) giving the worn texture, for armour. */
     val equipment: String?,
     val armorSlot: ArmorSlot?,
@@ -133,6 +171,12 @@ class ContentPackLoader(
     private fun readItem(section: ConfigurationSection?, namespace: String, key: String, where: String, file: File): CustomItemDefinition {
         if (section == null) throw ContentPackException(file, "$where must be a section")
         if (!KEY.matches(key)) throw ContentPackException(file, "$where: item id must be lowercase (a-z, 0-9, _ . -)")
+        for (option in section.getKeys(false)) {
+            if (option in ITEM_OPTIONS) continue
+            val hint = OPTION_HINTS[option.lowercase(Locale.ROOT)]?.let { " (did you mean $it?)" }
+                ?: " (options: ${ITEM_OPTIONS.joinToString(", ")})"
+            throw ContentPackException(file, "$where.$option: unknown option$hint")
+        }
         val materialName = section.getString("material").orEmpty()
         val material = Material.matchMaterial(materialName)?.takeIf { !it.name.endsWith("AIR") }
             ?: throw ContentPackException(file, "$where.material: unknown item material '$materialName'")
@@ -163,15 +207,21 @@ class ContentPackLoader(
                 enchants[enchantKey] = level
             }
         }
+        val stats = LinkedHashMap<ItemStat, Double>()
+        for (stat in ItemStat.entries) {
+            val value = section.get(stat.configName) ?: continue
+            val amount = number(value) ?: throw ContentPackException(file, "$where.${stat.configName} must be a number")
+            if (amount !in stat.range) {
+                throw ContentPackException(file, "$where.${stat.configName} must be ${fmt(stat.range.start)} to ${fmt(stat.range.endInclusive)}")
+            }
+            stats[stat] = amount
+        }
         val attributes = ArrayList<AttributeSpec>()
         section.getConfigurationSection("attributes")?.let { attrSection ->
             for (name in attrSection.getKeys(false)) {
                 val attributeKey = minecraftKey(name) ?: throw ContentPackException(file, "$where.attributes.$name: invalid key")
                 if (!attributeExists(attributeKey)) throw ContentPackException(file, "$where.attributes.$name: unknown attribute")
-                val value = attrSection.get(name)
-                val amount = (value as? Number)?.toDouble() ?: value?.toString()?.trim()?.toDoubleOrNull()
-                    ?: throw ContentPackException(file, "$where.attributes.$name must be a number")
-                attributes += AttributeSpec(attributeKey, amount)
+                attributes += readAttribute(attrSection, name, attributeKey, "$where.attributes.$name", file)
             }
         }
         val equipment = section.getString("equipment")?.trim()?.takeIf(String::isNotEmpty)?.let {
@@ -196,6 +246,7 @@ class ContentPackLoader(
             unbreakable = section.getBoolean("unbreakable", false),
             enchants = enchants,
             attributes = attributes,
+            stats = stats,
             equipment = equipment,
             armorSlot = armorSlot,
         )
@@ -222,6 +273,28 @@ class ContentPackLoader(
         }
     }
 
+    /** `name: 4` (added in the item's natural slot) or `name: { amount: 4, operation: multiply_base, slot: any }`. */
+    private fun readAttribute(parent: ConfigurationSection, name: String, key: NamespacedKey, where: String, file: File): AttributeSpec {
+        val detail = parent.getConfigurationSection(name)
+            ?: return AttributeSpec(key, number(parent.get(name)) ?: throw ContentPackException(file, "$where must be a number"))
+        for (option in detail.getKeys(false)) {
+            if (option !in ATTRIBUTE_OPTIONS) throw ContentPackException(file, "$where.$option: unknown option (options: amount, operation, slot)")
+        }
+        val amount = number(detail.get("amount")) ?: throw ContentPackException(file, "$where.amount must be a number")
+        val operation = detail.getString("operation")?.let {
+            ModifierOperation.fromConfig(it) ?: throw ContentPackException(file, "$where.operation must be add, multiply_base or multiply_total")
+        } ?: ModifierOperation.ADD
+        val slot = detail.getString("slot")?.trim()?.lowercase(Locale.ROOT)?.also {
+            if (it !in SLOT_GROUPS) throw ContentPackException(file, "$where.slot must be one of ${SLOT_GROUPS.joinToString(", ")}")
+        }
+        return AttributeSpec(key, amount, operation, slot)
+    }
+
+    private fun number(value: Any?): Double? =
+        ((value as? Number)?.toDouble() ?: value?.toString()?.trim()?.toDoubleOrNull())?.takeIf { it.isFinite() }
+
+    private fun fmt(value: Double): String = if (value == Math.floor(value)) value.toLong().toString() else value.toString()
+
     private fun checkedTexture(raw: String, where: String, file: File): String =
         try {
             texturePath(raw)
@@ -241,6 +314,23 @@ class ContentPackLoader(
         private val NAMESPACE = Regex("[a-z0-9_.-]+")
         private val KEY = Regex("[a-z0-9_.-]+")
         private val TEXTURE = Regex("[a-z0-9_./-]+")
+        /** Every option an item section may have; anything else is a typo and is reported. */
+        val ITEM_OPTIONS: List<String> = listOf(
+            "name", "lore", "material", "texture", "model", "max-durability", "max-stack-size", "unbreakable",
+            "enchants", "attributes", "equipment", "slot",
+        ) + ItemStat.entries.map(ItemStat::configName)
+        private val OPTION_HINTS = mapOf(
+            "damage" to "attack-damage", "attack_damage" to "attack-damage", "attack-dmg" to "attack-damage",
+            "speed" to "attack-speed", "attack_speed" to "attack-speed",
+            "armour" to "armor", "toughness" to "armor-toughness", "armor_toughness" to "armor-toughness",
+            "knockback_resistance" to "knockback-resistance",
+            "durability" to "max-durability", "max_durability" to "max-durability",
+            "stack-size" to "max-stack-size", "max_stack_size" to "max-stack-size",
+            "enchantments" to "enchants", "attribute" to "attributes", "display-name" to "name",
+        )
+        private val ATTRIBUTE_OPTIONS = setOf("amount", "operation", "slot")
+        /** Vanilla equipment slot group names (`EquipmentSlotGroup.getByName`). */
+        val SLOT_GROUPS = listOf("mainhand", "offhand", "hand", "head", "chest", "legs", "feet", "armor", "body", "any")
         private val HANDHELD_SUFFIXES = listOf("_SWORD", "_AXE", "_PICKAXE", "_SHOVEL", "_HOE", "_SPEAR")
 
         fun isHandheld(material: Material): Boolean =
