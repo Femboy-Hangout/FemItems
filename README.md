@@ -18,6 +18,8 @@ Build with the bundled Maven Wrapper and Java 25:
 
 Copy the shaded JAR `target/femitems-<version>.jar` into the `plugins` directory of a **Paper 26.3** or **Folia 26.3** server (running Java 25) and start it. On first startup, edit `plugins/FemItems/config.yml`, then run `/femitems reload` (or `/femi reload`). The command requires `femitems.reload` (operators by default).
 
+**Missing settings are reported.** On startup and on every `/femitems reload` / `/femjukebox reload`, any setting the jar's copy of `config.yml` or `jukebox/config.yml` has and your file doesn't (an update added it, or a line was deleted) is named in the console, e.g. `[config.yml] 'resource-pack.required' is missing - the default is: false`, followed by a count line. Your file is never rewritten and the default applies. Your own `mobs:` and `recipes:` are never reported, so a default mob or recipe you deleted stays deleted.
+
 ## Commands
 
 All commands require `femitems.reload` (operators by default). `/femi` is an alias for `/femitems`.

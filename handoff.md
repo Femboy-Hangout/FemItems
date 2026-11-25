@@ -52,6 +52,10 @@ On Folia 26.3, the console command `clear <player> <item> 0` replies `Found 1 ma
 2. Decide whether the enchanted book/sword drops need configurable random vanilla enchantments against Paper 26.3's API.
 3. Adjust or expand the default crafting recipes under `recipes` in `plugins/FemItems/config.yml` as desired.
 
+## Missing settings report (2026-11-25)
+
+`MissingKeys.kt` (same behaviour as the `MissingKeys` class in FemCore, FemSkills, FemSkyblock and the other Fem plugins): `loadContent()` checks `config.yml` (own lists `mobs`, `recipes`) and `JukeboxFeature.reload()` checks `jukebox/config.yml`, against the jar's copies, on startup and every reload. Report only (`fill = false`): the code already falls back to the same defaults, and filling `resource-pack.mode` would break the 2.2.0 self-host detection. When you add a setting to either file, nothing else is needed; a NEW yml file should call `MissingKeys.check(...)` where it is loaded. Covered by `MissingKeysTest` and the live suite (fresh install reports nothing; a config without `resource-pack` and a jukebox config without `bossbar-color` are reported on reload). The version was not bumped (the owner bumps versions).
+
 ## Recipe resync gotcha (Paper/Folia 26.3)
 
 Every recipe-manager change ends in `RecipeManager.finalizeRecipeLoading()` → `PlayerList.reloadResources()`, which for **every online player** re-reads advancements from disk and re-sends all advancements, tags and the full recipe book. `Bukkit.addRecipe(recipe, false)` / `removeRecipe(key, false)` **ignore** the `resend` flag (they're default interface methods), so per-recipe calls cause one full resync per recipe (8 recipes → 16 resyncs per reload, visible client-side as repeated "Loaded 885 advancements"). Always use `Bukkit.addRecipes(...)` / `Bukkit.removeRecipes(...)` (one resync per call) and diff definitions so unchanged recipes aren't touched. The live test counts `ClientboundUpdateRecipesPacket`s to guard this.

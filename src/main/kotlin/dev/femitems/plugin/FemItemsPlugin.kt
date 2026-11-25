@@ -319,6 +319,9 @@ class FemItemsPlugin : JavaPlugin(), Listener {
         return try {
             val newConfig = YamlConfiguration()
             newConfig.load(configFile)
+            // Settings config.yml doesn't have yet (an update added them, or a line was deleted): console + jar default.
+            // Report only - the code already falls back to the same defaults. mobs/recipes are the server's own lists.
+            MissingKeys.check(this, "config.yml", newConfig, false, "mobs", "recipes")
             // A bad resource-pack setting must never stop items, recipes and drops from loading.
             val settings = try {
                 ResourcePackSettings.from(newConfig.getConfigurationSection("resource-pack"))
