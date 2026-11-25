@@ -42,7 +42,7 @@ class MissingKeysTest {
         assertEquals(
             listOf(
                 "[config.yml] 'resource-pack.required' is missing - the default is: false",
-                "[config.yml] 'resource-pack.self-host' (the whole section) is missing - the default is.",
+                "[config.yml] 'resource-pack.self-host' (the whole section) is missing - its defaults are in the jar's copy.",
                 "[config.yml] 2 setting(s) missing (above). Add them to plugins/FemItems/config.yml to change them - " +
                     "the jar's copy of config.yml shows where they go.",
             ),
