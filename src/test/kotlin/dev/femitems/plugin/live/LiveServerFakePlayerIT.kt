@@ -8,6 +8,7 @@ import java.nio.file.Path
 import java.time.Duration
 import kotlin.math.abs
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
@@ -88,6 +89,11 @@ class LiveServerFakePlayerIT {
             assertTrue(
                 startupLog.contains("Jukebox ready: loaded 4 song(s)."),
                 "[$platform] Expected the jukebox to load the 4 bundled resource-pack tracks on startup",
+            )
+            // The freshly saved default files have every setting, so nothing may be reported missing.
+            assertFalse(
+                startupLog.contains("setting(s) missing"),
+                "[$platform] A fresh install must not report missing settings",
             )
 
             // 2. Connect two real fake players: FakeOp (operator) and FakeGuest (non-operator)
@@ -193,6 +199,17 @@ class LiveServerFakePlayerIT {
                         sinceIndex = opChatBeforeReload,
                     )
                     server.awaitLog(Regex("""Loaded 1 mob rules and 3 recipes\."""), fromOffset = logBeforeReload)
+                    // That config has no resource-pack section: the console names it once. The default mobs and
+                    // recipes it left out are the server's own lists and are never reported.
+                    val reloadLog = server.readLog().substring(logBeforeReload)
+                    assertTrue(
+                        reloadLog.contains("[config.yml] 'resource-pack' (the whole section) is missing"),
+                        "[$platform] Expected the missing resource-pack section to be reported on reload:\n$reloadLog",
+                    )
+                    assertTrue(
+                        reloadLog.contains("[config.yml] 1 setting(s) missing (above). Add them to plugins/FemItems/config.yml"),
+                        "[$platform] Expected exactly one missing setting (own lists skipped):\n$reloadLog",
+                    )
 
                     // Every recipe-manager change makes the server re-send advancements, tags and the full recipe
                     // book to every player. Swapping 8 default recipes for 3 new ones must cost at most one batch
@@ -481,9 +498,20 @@ class LiveServerFakePlayerIT {
             """.trimIndent() + "\n",
             StandardCharsets.UTF_8,
         )
+        // A setting deleted from jukebox/config.yml is named on reload (its default, PURPLE, still applies).
+        val jukeboxConfig = server.pluginDataDir().resolve("jukebox").resolve("config.yml")
+        val jukeboxLines = Files.readAllLines(jukeboxConfig, StandardCharsets.UTF_8)
+        assertTrue(jukeboxLines.any { it.trimStart().startsWith("bossbar-color:") }, "[$platform] bossbar-color in jukebox/config.yml")
+        Files.write(jukeboxConfig, jukeboxLines.filterNot { it.trimStart().startsWith("bossbar-color:") }, StandardCharsets.UTF_8)
+        val logBeforeJukeboxReload = server.readLog().length
+
         val opChatBeforeReload = op.chatCount()
         op.sendCommand("femjukebox reload")
         op.awaitChatContaining("[FemJukebox] Loaded 6 song(s).", sinceIndex = opChatBeforeReload)
+        server.awaitLog(
+            Regex("""\[jukebox/config\.yml] 'jukebox\.bossbar-color' is missing - the default is: "PURPLE""""),
+            fromOffset = logBeforeJukeboxReload,
+        )
 
         // J2. Non-admins only see note songs and cannot use admin subcommands or disc-only tracks.
         val guestChatBeforeSongs = guest.chatCount()

@@ -58,7 +58,10 @@ class JukeboxFeature(private val plugin: JavaPlugin) {
 
     /** Reloads `config.yml` and the song catalog; thread-agnostic (file I/O only). Returns the song count. */
     fun reload(): Int = synchronized(reloadLock) {
-        settings = JukeboxSettings.from(YamlConfiguration.loadConfiguration(folder.resolve("config.yml").toFile()))
+        val yaml = YamlConfiguration.loadConfiguration(folder.resolve("config.yml").toFile())
+        // Report only: JukeboxSettings falls back to the same defaults in code.
+        dev.femitems.plugin.MissingKeys.check(plugin, "jukebox/config.yml", yaml, false)
+        settings = JukeboxSettings.from(yaml)
         val catalog = loader.load()
         music.catalog = catalog
         catalog.size
