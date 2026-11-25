@@ -614,6 +614,8 @@ class LiveServerFakePlayerIT {
         op.sendCommand("kill @e[type=minecraft:item]")
         server.sendConsoleCommand("clear FakeOp")
         Thread.sleep(500)
+        // The give lands in the first free slot (hotbar 0 on an empty inventory); hold that slot like a player would.
+        op.selectHotbarSlot(0)
         val opChatBeforePlace = op.chatCount()
         val opItemsBeforePlace = op.receivedItemCount()
         op.sendCommand("femjukebox give FakeOp 1")
@@ -624,7 +626,16 @@ class LiveServerFakePlayerIT {
         assertBlock(op, "2 -60 2", "minecraft:air", expected = true)
         assertNoEntityIn(op, "x=2,y=-60,z=2,dx=0,dy=0,dz=0") // an entity in the space blocks placement
         assertBlock(op, "2 -61 2", "minecraft:air", expected = false) // solid ground (grass turns to dirt under blocks)
-        assertTrue(conditional(op, "execute if items entity @s weapon.mainhand minecraft:jukebox"), "[$platform] FakeOp is not holding the jukebox before placing")
+        if (!conditional(op, "execute if items entity @s weapon.mainhand minecraft:jukebox")) {
+            // Say where it went instead of a bare failure (this step was flaky on Paper).
+            val hotbar = (0..8).filter { conditional(op, "execute if items entity @s hotbar.$it minecraft:jukebox") }
+            val inInventory = conditional(op, "execute if items entity @s inventory.* minecraft:jukebox")
+            val occupied = (0..8).filter { conditional(op, "execute if items entity @s hotbar.$it *") }
+            throw AssertionError(
+                "[$platform] FakeOp is not holding the jukebox before placing: it is in hotbar slot(s) $hotbar" +
+                    " (main inventory: $inInventory); occupied hotbar slots: $occupied",
+            )
+        }
         op.useItemOnBlock(2, -61, 2) // top face of the ground block -> places at (2, -60, 2)
         Thread.sleep(1000)
         if (!conditional(op, "execute if block 2 -60 2 minecraft:jukebox")) {

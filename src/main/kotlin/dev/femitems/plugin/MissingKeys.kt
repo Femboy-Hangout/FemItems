@@ -54,10 +54,15 @@ object MissingKeys {
         } else {
             for (key in reported) {
                 val section = bundled.isConfigurationSection(key)
-                val what = if (fill) "using the default" else "the default is"
+                val what = when {
+                    section && fill -> "using its defaults."
+                    section -> "its defaults are in the jar's copy."
+                    fill -> "using the default: " + show(bundled.get(key))
+                    else -> "the default is: " + show(bundled.get(key))
+                }
                 warn(
                     "[$file] '$key'" + (if (section) " (the whole section)" else "") + " is missing - " +
-                        what + (if (section) "." else ": " + show(bundled.get(key))),
+                        what,
                 )
             }
             warn(
