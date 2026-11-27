@@ -45,6 +45,47 @@ data class AttributeSpec(
     val slot: String? = null,
 )
 
+/** What an item's right-click ability does, and which extra options it takes. */
+enum class AbilityType(val configName: String, val options: List<String>) {
+    /** Dash [ItemAbility.distance] blocks forward (horizontally), stopping at walls. */
+    TELEPORT("teleport", listOf("distance")),
+    /** Launch forward and up with [ItemAbility.power]. */
+    LEAP("leap", listOf("power")),
+    /** Restore [ItemAbility.amount] health (2 = one heart). */
+    HEAL("heal", listOf("amount")),
+    /** Give yourself [ItemAbility.effect] at [ItemAbility.level] for [ItemAbility.durationSeconds]. */
+    EFFECT("effect", listOf("effect", "level", "duration")),
+    /** Shoot a blaze fireball; [ItemAbility.incendiary] also sets blocks on fire. */
+    FIREBALL("fireball", listOf("incendiary")),
+    /** Strike lightning at the block you look at, up to [ItemAbility.distance] away. */
+    LIGHTNING("lightning", listOf("distance", "damage"));
+
+    companion object {
+        fun fromConfig(name: String): AbilityType? = entries.firstOrNull { it.configName == name.trim().lowercase(Locale.ROOT) }
+    }
+}
+
+/** A right-click ability with a per-player cooldown; [cooldownMessage] may use `{seconds}`. */
+data class ItemAbility(
+    val type: AbilityType,
+    val cooldownSeconds: Double,
+    val cooldownMessage: String = DEFAULT_COOLDOWN_MESSAGE,
+    val distance: Double = 0.0,
+    val power: Double = 0.0,
+    val amount: Double = 0.0,
+    /** Potion effect id (e.g. `minecraft:speed`), for [AbilityType.EFFECT]. */
+    val effect: NamespacedKey? = null,
+    val level: Int = 1,
+    val durationSeconds: Double = 0.0,
+    val incendiary: Boolean = false,
+    /** Lightning: true = real lightning (damage, fire), false = harmless visual strike. */
+    val damage: Boolean = true,
+) {
+    companion object {
+        const val DEFAULT_COOLDOWN_MESSAGE = "&cWait {seconds} seconds"
+    }
+}
+
 /**
  * Headline stats, written as the total the tooltip shows (`attack-damage: 12` = "12 Attack Damage").
  * Each one replaces the base item's own value for that attribute. [playerBase] is the player's base
@@ -84,6 +125,8 @@ data class CustomItemDefinition(
     val stats: Map<ItemStat, Double> = emptyMap(),
     /** Browser category (`/femitems browse`); null = automatic from the material (see [ItemCategories]). */
     val category: String? = null,
+    /** Right-click ability (see [ItemAbility]); null = none. */
+    val ability: ItemAbility? = null,
     /** Equipment asset id (`namespace:name`) giving the worn texture, for armour. */
     val equipment: String?,
     val armorSlot: ArmorSlot?,
@@ -117,6 +160,7 @@ class ContentPackLoader(
     private val contentsFolder: Path,
     private val enchantmentExists: (NamespacedKey) -> Boolean,
     private val attributeExists: (NamespacedKey) -> Boolean,
+    private val effectExists: (NamespacedKey) -> Boolean = { true },
 ) {
     fun load(): List<ContentPack> {
         if (!Files.isDirectory(contentsFolder)) return emptyList()
@@ -252,9 +296,47 @@ class ContentPackLoader(
             category = section.getString("category")?.trim()?.takeIf(String::isNotEmpty)?.also {
                 if (it.length > 32) throw ContentPackException(file, "$where.category must be at most 32 characters")
             },
+            ability = section.get("ability")?.let { readAbility(section.getConfigurationSection("ability"), "$where.ability", file) },
             equipment = equipment,
             armorSlot = armorSlot,
         )
+    }
+
+    private fun readAbility(section: ConfigurationSection?, where: String, file: File): ItemAbility {
+        val types = AbilityType.entries.joinToString(", ") { it.configName }
+        if (section == null) throw ContentPackException(file, "$where must be a section with a type ($types)")
+        val typeName = section.getString("type") ?: throw ContentPackException(file, "$where.type is required ($types)")
+        val type = AbilityType.fromConfig(typeName) ?: throw ContentPackException(file, "$where.type: unknown ability '$typeName' ($types)")
+        val allowed = ABILITY_OPTIONS + type.options
+        for (option in section.getKeys(false)) {
+            if (option !in allowed) throw ContentPackException(file, "$where.$option: not an option for ${type.configName} (options: ${allowed.joinToString(", ")})")
+        }
+        fun ranged(path: String, default: Double, range: ClosedFloatingPointRange<Double>): Double {
+            val value = section.get(path) ?: return default
+            val number = number(value) ?: throw ContentPackException(file, "$where.$path must be a number")
+            if (number !in range) throw ContentPackException(file, "$where.$path must be ${fmt(range.start)} to ${fmt(range.endInclusive)}")
+            return number
+        }
+        val cooldown = ranged("cooldown", 10.0, 0.0..86400.0)
+        val message = section.getString("cooldown-message") ?: ItemAbility.DEFAULT_COOLDOWN_MESSAGE
+        val base = ItemAbility(type, cooldown, message)
+        return when (type) {
+            AbilityType.TELEPORT -> base.copy(distance = ranged("distance", 5.0, 1.0..32.0))
+            AbilityType.LEAP -> base.copy(power = ranged("power", 1.5, 0.1..4.0))
+            AbilityType.HEAL -> base.copy(amount = ranged("amount", 6.0, 0.5..1024.0))
+            AbilityType.EFFECT -> {
+                val name = section.getString("effect") ?: throw ContentPackException(file, "$where.effect is required (e.g. speed, strength, regeneration)")
+                val key = minecraftKey(name) ?: throw ContentPackException(file, "$where.effect: invalid key '$name'")
+                if (!effectExists(key)) throw ContentPackException(file, "$where.effect: unknown effect '$name'")
+                base.copy(
+                    effect = key,
+                    level = ranged("level", 1.0, 1.0..255.0).toInt(),
+                    durationSeconds = ranged("duration", 10.0, 0.05..3600.0),
+                )
+            }
+            AbilityType.FIREBALL -> base.copy(incendiary = section.getBoolean("incendiary", false))
+            AbilityType.LIGHTNING -> base.copy(distance = ranged("distance", 20.0, 1.0..32.0), damage = section.getBoolean("damage", true))
+        }
     }
 
     private fun validate(pack: ContentPack) {
@@ -322,8 +404,9 @@ class ContentPackLoader(
         /** Every option an item section may have; anything else is a typo and is reported. */
         val ITEM_OPTIONS: List<String> = listOf(
             "name", "lore", "material", "texture", "model", "max-durability", "max-stack-size", "unbreakable",
-            "enchants", "attributes", "equipment", "slot", "category",
+            "enchants", "attributes", "equipment", "slot", "category", "ability",
         ) + ItemStat.entries.map(ItemStat::configName)
+        private val ABILITY_OPTIONS = listOf("type", "cooldown", "cooldown-message")
         private val OPTION_HINTS = mapOf(
             "damage" to "attack-damage", "attack_damage" to "attack-damage", "attack-dmg" to "attack-damage",
             "speed" to "attack-speed", "attack_speed" to "attack-speed",

@@ -785,6 +785,7 @@ class LiveServerFakePlayerIT {
                 attack-speed: 2
                 attributes:
                   max_health: 4
+                ability: { type: teleport, distance: 5, cooldown: 2 }
               ruby_helmet:
                 name: "&cRuby Helmet"
                 material: DIAMOND_HELMET
@@ -1088,6 +1089,81 @@ class LiveServerFakePlayerIT {
         val backHome = op.awaitScreenTitleContaining("Custom items", sinceIndex = browseScreens)
         assertEquals("Custom items", backHome.title)
         op.closeContainer(backHome)
+
+        // C10. Teleport ability (ruby sword: 5 blocks, 2 s cooldown): right-click dashes forward, a second
+        // click right away says to wait and does not move, and a wall stops the dash in front of it.
+        op.sendCommand("tp @s 0.5 -60 0.5 0 0") // facing south (+z) on flat ground
+        Thread.sleep(500)
+        op.selectHotbarSlot(1)
+        Thread.sleep(300)
+        var teleportsBefore = op.teleportCount()
+        op.useHeldItem()
+        val dashed = op.awaitTeleport("a 5-block dash south", sinceIndex = teleportsBefore) { (x, _, z) -> abs(x - 0.5) < 0.01 && abs(z - 5.5) < 0.01 }
+        assertEquals(-60.0, dashed[1], 0.01, "[$platform] The dash changed height")
+        Thread.sleep(300)
+        val chatBeforeCooldown = op.chatCount()
+        teleportsBefore = op.teleportCount()
+        op.useHeldItem()
+        val wait = op.awaitChatContaining("Wait ", sinceIndex = chatBeforeCooldown)
+        assertTrue(Regex("""Wait [12] seconds?$""").containsMatchIn(wait), "[$platform] Unexpected cooldown message: $wait")
+        Thread.sleep(500)
+        assertEquals(teleportsBefore, op.teleportCount(), "[$platform] The ability teleported during its cooldown")
+        op.sendCommand("fill 0 -60 8 1 -59 8 minecraft:stone") // a wall 2.5 blocks ahead
+        Thread.sleep(2500) // cooldown over
+        teleportsBefore = op.teleportCount()
+        op.useHeldItem()
+        val stopped = op.awaitTeleport("a dash stopped by the wall", sinceIndex = teleportsBefore) { (_, _, z) -> z > 5.6 }
+        assertEquals(7.5, stopped[2], 0.01, "[$platform] The dash did not stop right in front of the wall (wall starts at z=8)")
+        op.sendCommand("fill 0 -60 8 1 -59 8 minecraft:air")
+
+        // C11. The other abilities, each swapped onto the sword with a reload (the held stack picks it up).
+        fun swordAbility(ability: String) {
+            val file = pack.resolve("items.yml")
+            Files.writeString(file, Files.readString(file).replace(Regex("""ability: \{[^\n]*}"""), "ability: $ability"))
+            val mark = op.chatCount()
+            op.sendCommand("femitems reload")
+            op.awaitChatContaining("[FemItems] Config reloaded.", sinceIndex = mark)
+            Thread.sleep(300)
+        }
+        Thread.sleep(2000) // the teleport cooldown (same item) runs out
+        // Leap: launched forward (south) with lift.
+        swordAbility("{ type: leap, power: 1.5, cooldown: 0 }")
+        val motionBefore = op.motionCount()
+        op.useHeldItem()
+        val leap = op.awaitMotion("a leap forward and up", sinceIndex = motionBefore) { (_, y, z) -> y > 0.3 && z > 1.0 }
+        assertTrue(abs(leap[1] - 0.4) < 0.05 && abs(leap[2] - 1.5) < 0.05, "[$platform] Unexpected leap velocity $leap")
+        // Heal: +10 health in one go (natural regeneration alone can't add that much within the timeout).
+        server.sendConsoleCommand("gamemode survival FakeOp")
+        val healthBeforeHurt = op.healthCount()
+        server.sendConsoleCommand("damage FakeOp 14 minecraft:out_of_world")
+        val hurt = op.awaitHealth("health after 14 damage", sinceIndex = healthBeforeHurt) { it <= 10.5f }
+        swordAbility("{ type: heal, amount: 10, cooldown: 0 }")
+        val healthBeforeHeal = op.healthCount()
+        op.useHeldItem()
+        op.awaitHealth("+10 health from the heal ability", sinceIndex = healthBeforeHeal, timeout = Duration.ofSeconds(3)) { it >= hurt + 9.9f }
+        // Effect: Speed II.
+        swordAbility("{ type: effect, effect: speed, level: 2, duration: 5, cooldown: 0 }")
+        val effectsBefore = op.effectCount()
+        op.useHeldItem()
+        op.awaitEffect("Speed II", sinceIndex = effectsBefore) { it.uppercase().contains("SPEED") && it.endsWith(":1") }
+        // Fireball.
+        swordAbility("{ type: fireball, cooldown: 0 }")
+        var spawns = op.spawnedEntityCount()
+        op.useHeldItem()
+        op.awaitSpawnedEntity("SMALL_FIREBALL", sinceIndex = spawns)
+        // Lightning (visual only here) at the block looked at; looking at the sky says there is no target.
+        swordAbility("{ type: lightning, distance: 20, damage: false, cooldown: 0 }")
+        op.sendCommand("tp @s 0.5 -60 0.5 0 60") // looking down at the ground ahead
+        Thread.sleep(500)
+        spawns = op.spawnedEntityCount()
+        op.useHeldItem(pitch = 60f)
+        op.awaitSpawnedEntity("LIGHTNING_BOLT", sinceIndex = spawns)
+        op.sendCommand("tp @s 0.5 -60 0.5 0 -60") // looking at the sky
+        Thread.sleep(500)
+        val chatBeforeSky = op.chatCount()
+        op.useHeldItem(pitch = -60f)
+        op.awaitChatContaining("Look at a block within range.", sinceIndex = chatBeforeSky)
+        op.selectHotbarSlot(0)
     }
 
     /**

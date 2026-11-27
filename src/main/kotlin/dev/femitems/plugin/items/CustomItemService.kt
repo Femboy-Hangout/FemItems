@@ -67,7 +67,7 @@ class CustomItemService(private val plugin: JavaPlugin) : Listener {
 
     /** Loads content packs and builds item stacks plus the resource pack. Throws [ContentPackException]. */
     fun load(settings: ResourcePackSettings): LoadedItems {
-        val packs = ContentPackLoader(contentsFolder, ::enchantmentExists, ::attributeExists).load()
+        val packs = ContentPackLoader(contentsFolder, ::enchantmentExists, ::attributeExists, ::effectExists).load()
         val definitions = LinkedHashMap<String, CustomItemDefinition>()
         for (pack in packs) {
             for (item in pack.items) definitions[item.id] = item
@@ -291,6 +291,9 @@ class CustomItemService(private val plugin: JavaPlugin) : Listener {
 
     private fun enchantmentExists(key: NamespacedKey): Boolean =
         RegistryAccess.registryAccess().getRegistry(RegistryKey.ENCHANTMENT).get(key) != null
+
+    private fun effectExists(key: NamespacedKey): Boolean =
+        RegistryAccess.registryAccess().getRegistry(RegistryKey.MOB_EFFECT).get(key) != null
 
     private fun attributeExists(key: NamespacedKey): Boolean =
         RegistryAccess.registryAccess().getRegistry(RegistryKey.ATTRIBUTE).get(key) != null

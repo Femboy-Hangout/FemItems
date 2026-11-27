@@ -6,6 +6,7 @@ import com.mojang.brigadier.arguments.StringArgumentType
 import dev.femitems.plugin.items.ContentPackException
 import dev.femitems.plugin.items.CustomItemService
 import dev.femitems.plugin.items.ItemBrowser
+import dev.femitems.plugin.items.AbilityService
 import dev.femitems.plugin.items.LoadedItems
 import dev.femitems.plugin.items.ResourcePackSettings
 import io.papermc.paper.command.brigadier.argument.ArgumentTypes
@@ -73,6 +74,9 @@ class FemItemsPlugin : JavaPlugin(), Listener {
     /** `/femitems browse`: the custom item GUI, by category. */
     private val itemBrowser = ItemBrowser(this, customItems)
 
+    /** Right-click item abilities (`ability:` in items.yml) and their per-player cooldowns. */
+    private val abilities = AbilityService(this, customItems)
+
     /** NBS music & Custom Jukebox feature (formerly the standalone FemJukebox plugin). */
     private var jukebox: JukeboxFeature? = null
 
@@ -81,6 +85,7 @@ class FemItemsPlugin : JavaPlugin(), Listener {
         server.pluginManager.registerEvents(this, this)
         server.pluginManager.registerEvents(customItems, this)
         server.pluginManager.registerEvents(itemBrowser, this)
+        server.pluginManager.registerEvents(abilities, this)
 
         val platform = if (isFolia()) "Folia" else "Paper"
         logger.info("Initializing FemItems ${pluginMeta.version} on $platform.")
@@ -94,6 +99,7 @@ class FemItemsPlugin : JavaPlugin(), Listener {
         jukebox?.disable()
         jukebox = null
         customItems.shutdown()
+        abilities.shutdown()
         removeRegisteredRecipes()
     }
 
@@ -167,7 +173,7 @@ class FemItemsPlugin : JavaPlugin(), Listener {
             .then(
                 Commands.literal("stats").executes { context ->
                     val sizes = (jukebox?.music?.stateSizes() ?: emptyMap()) +
-                        mapOf("custom_items" to customItems.current.count, "recipes" to registeredRecipeKeys.size)
+                        mapOf("ability_players" to abilities.trackedPlayers(), "custom_items" to customItems.current.count, "recipes" to registeredRecipeKeys.size)
                     context.source.sender.sendMessage(Messages.stats(sizes))
                     Command.SINGLE_SUCCESS
                 },

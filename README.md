@@ -129,6 +129,30 @@ It also chooses the slot: `mainhand`, `offhand`, `hand`, `head`, `chest`, `legs`
 
 Other item options: `unbreakable: true`, `max-stack-size: 1-99` (not with durability), `slot: head|chest|legs|feet` for wearables that are not armour, and `category: <name>` to group the item in `/femitems browse`. Without `category`, items are sorted into Weapons, Tools, Armor or Other by their material. A misspelt option (for example `damage:` instead of `attack-damage:`) is reported on reload with a suggestion, rather than silently ignored.
 
+**Abilities.** `ability:` gives an item a right-click power with a per-player cooldown:
+
+```yaml
+  cosmic_sword:
+    material: DIAMOND_SWORD
+    texture: item/cosmic_sword
+    ability:
+      type: teleport
+      distance: 5
+      cooldown: 15                              # seconds (default 10, 0 = none)
+      cooldown-message: '&cWait {seconds} seconds'   # the default
+```
+
+| `type` | What it does | Options (default) |
+|---|---|---|
+| `teleport` | Dash forward horizontally. The whole path is checked, so it stops in front of walls and never passes through blocks. | `distance` (5, max 32) |
+| `leap` | Launch forward and up the way you look. | `power` (1.5, 0.1–4) |
+| `heal` | Restore health instantly. | `amount` (6; 2 = one heart) |
+| `effect` | Give yourself a potion effect. | `effect` (required, e.g. `speed`), `level` (1), `duration` (10 s) |
+| `fireball` | Shoot a blaze fireball. | `incendiary` (false; true also sets blocks on fire) |
+| `lightning` | Strike the block you look at. | `distance` (20, max 32), `damage` (true; false = visual only) |
+
+Abilities trigger on right-click in the air or on an ordinary block. Doors, chests and other usable blocks keep working, and sneaking uses the ability on them instead. When an ability can't work (no room, full health, nothing in range), the player is told why and the cooldown doesn't start. Cooldowns are per player and per item, are cleared when a player leaves, and their count shows in `/femitems stats`. On Folia, an ability only touches the blocks of the region it runs in.
+
 ### Using custom items in recipes and drops
 
 Anywhere `config.yml` takes a material, a custom item works too:

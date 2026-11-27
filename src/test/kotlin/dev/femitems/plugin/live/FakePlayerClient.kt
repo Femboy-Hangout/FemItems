@@ -16,6 +16,9 @@ import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.Clie
 import org.geysermc.mcprotocollib.protocol.data.game.entity.attribute.Attribute
 import org.geysermc.mcprotocollib.protocol.data.game.entity.attribute.ModifierOperation
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.ClientboundAddEntityPacket
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.ClientboundSetEntityMotionPacket
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.ClientboundUpdateMobEffectPacket
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.player.ClientboundSetHealthPacket
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.ClientboundSetEntityDataPacket
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.ClientboundUpdateAttributesPacket
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundAttackPacket
@@ -164,6 +167,13 @@ class FakePlayerClient(
     private val ownAttributes = ConcurrentHashMap<String, Double>()
     private val spawnedEntities = BoundedEventBuffer<SpawnedEntity>(MAX_CAPTURED_EVENTS)
     private val entityHealth = BoundedEventBuffer<EntityHealth>(MAX_CAPTURED_EVENTS)
+    /** Absolute positions the server moved this player to (teleports), as x/y/z. */
+    private val teleports = BoundedEventBuffer<List<Double>>(MAX_CAPTURED_EVENTS)
+    /** Velocities the server gave this player (x, y, z), e.g. from a leap. */
+    private val ownMotion = BoundedEventBuffer<List<Double>>(MAX_CAPTURED_EVENTS)
+    private val ownHealth = BoundedEventBuffer<Float>(MAX_CAPTURED_EVENTS)
+    /** Potion effects added to this player, as `EFFECT:amplifier`. */
+    private val ownEffects = BoundedEventBuffer<String>(MAX_CAPTURED_EVENTS)
 
     private var session: ClientNetworkSession? = null
 
@@ -197,6 +207,7 @@ class FakePlayerClient(
 
                     is ClientboundPlayerPositionPacket -> {
                         val pos = packet.position
+                        teleports.add(listOf(pos.x, pos.y, pos.z))
                         session.send(
                             ServerboundAcceptTeleportationPacket(
                                 packet.id,
@@ -223,6 +234,16 @@ class FakePlayerClient(
                     }
 
                     is ClientboundAddEntityPacket -> spawnedEntities.add(SpawnedEntity(packet.entityId, packet.type.name))
+
+                    is ClientboundSetEntityMotionPacket -> if (packet.entityId == ownEntityId.get()) {
+                        ownMotion.add(listOf(packet.movement.x, packet.movement.y, packet.movement.z))
+                    }
+
+                    is ClientboundSetHealthPacket -> ownHealth.add(packet.health)
+
+                    is ClientboundUpdateMobEffectPacket -> if (packet.entityId == ownEntityId.get()) {
+                        ownEffects.add("${packet.effect}:${packet.amplifier}")
+                    }
 
                     // Living entities sync their health to every viewer (metadata index 9).
                     is ClientboundSetEntityDataPacket -> for (data in packet.metadata) {
@@ -372,9 +393,12 @@ class FakePlayerClient(
         }, "$username-pack-download").apply { isDaemon = true }.start()
     }
 
-    /** Right-clicks with the held item in the air (e.g. equips armour, like a real client). */
-    fun useHeldItem() {
-        send(ServerboundUseItemPacket(Hand.MAIN_HAND, blockSequence.incrementAndGet(), 0f, 0f))
+    /**
+     * Right-clicks with the held item in the air (e.g. equips armour). Like a real client, the packet carries where
+     * the player looks ([yaw], [pitch]) and the server applies it.
+     */
+    fun useHeldItem(yaw: Float = 0f, pitch: Float = 0f) {
+        send(ServerboundUseItemPacket(Hand.MAIN_HAND, blockSequence.incrementAndGet(), yaw, pitch))
     }
 
     fun offeredPackCount(): Int = offeredPacks.count()
@@ -437,6 +461,27 @@ class FakePlayerClient(
         }
         throw AssertionError("Fake player '$username': $attribute is ${ownAttributes[attribute]}, expected $expected. All: $ownAttributes")
     }
+
+    fun teleportCount(): Int = teleports.count()
+
+    fun motionCount(): Int = ownMotion.count()
+
+    fun awaitMotion(description: String, sinceIndex: Int = 0, timeout: Duration = Duration.ofSeconds(15), predicate: (List<Double>) -> Boolean): List<Double> =
+        awaitEvent(ownMotion, description, sinceIndex, timeout, predicate)
+
+    fun healthCount(): Int = ownHealth.count()
+
+    fun awaitHealth(description: String, sinceIndex: Int = 0, timeout: Duration = Duration.ofSeconds(15), predicate: (Float) -> Boolean): Float =
+        awaitEvent(ownHealth, description, sinceIndex, timeout, predicate)
+
+    fun effectCount(): Int = ownEffects.count()
+
+    fun awaitEffect(description: String, sinceIndex: Int = 0, timeout: Duration = Duration.ofSeconds(15), predicate: (String) -> Boolean): String =
+        awaitEvent(ownEffects, description, sinceIndex, timeout, predicate)
+
+    /** Waits for the server to move this player to a position matching [predicate] (x, y, z). */
+    fun awaitTeleport(description: String, sinceIndex: Int = 0, timeout: Duration = Duration.ofSeconds(15), predicate: (List<Double>) -> Boolean): List<Double> =
+        awaitEvent(teleports, description, sinceIndex, timeout, predicate)
 
     fun spawnedEntityCount(): Int = spawnedEntities.count()
 

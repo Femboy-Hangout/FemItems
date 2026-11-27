@@ -583,4 +583,121 @@ class CustomItemsTest {
         }
         assertContains(error.message!!, "assets/blossom_studios/items/platinum_sword.json clashes with a file FemItems generates")
     }
+
+    // ------------------------------------------------------------------ abilities
+
+    @Test
+    fun `teleport ability is read with defaults and validated`(@TempDir root: Path) {
+        val contents = root.resolve("ok")
+        pack(
+            contents, "ns",
+            """
+            items:
+              blink:
+                material: DIAMOND_SWORD
+                texture: t
+                ability: { type: teleport, distance: 5, cooldown: 15 }
+              custom:
+                material: DIAMOND_SWORD
+                texture: t
+                ability: { type: TELEPORT, cooldown-message: "&eHold on, {seconds}s" }
+              plain: { material: DIAMOND_SWORD, texture: t }
+            """,
+            "t",
+        )
+        val items = loader(contents).load().single().items.associateBy(CustomItemDefinition::key)
+        assertEquals(ItemAbility(AbilityType.TELEPORT, cooldownSeconds = 15.0, distance = 5.0), items.getValue("blink").ability)
+        assertEquals(ItemAbility(AbilityType.TELEPORT, 10.0, "&eHold on, {seconds}s", distance = 5.0), items.getValue("custom").ability)
+        assertNull(items.getValue("plain").ability)
+
+        fun error(ability: String): String {
+            val folder = root.resolve("e-${System.nanoTime()}")
+            pack(folder, "ns", "items:\n  a:\n    material: DIAMOND_SWORD\n    texture: t\n    ability: $ability\n", "t")
+            return assertFailsWith<ContentPackException> { loader(folder).load() }.message!!
+        }
+        assertContains(error("{ distance: 5 }"), "ability.type is required")
+        assertContains(error("{ type: meteor }"), "unknown ability 'meteor'")
+        assertContains(error("{ type: teleport, distance: 100 }"), "ability.distance must be 1 to 32")
+        assertContains(error("{ type: teleport, cooldown: -1 }"), "ability.cooldown must be 0 to 86400")
+        assertContains(error("{ type: teleport, range: 5 }"), "ability.range: not an option for teleport")
+        assertContains(error("{ type: teleport, power: 2 }"), "ability.power: not an option for teleport")
+        assertContains(error("teleport"), "ability must be a section")
+    }
+
+    @Test
+    fun `every ability type reads its own options with defaults`(@TempDir root: Path) {
+        val known = setOf("speed", "strength", "regeneration")
+        val effectLoader = { folder: Path ->
+            ContentPackLoader(folder, { true }, { true }, effectExists = { it.namespace == "minecraft" && it.key in known })
+        }
+        val contents = root.resolve("ok")
+        pack(
+            contents, "ns",
+            """
+            items:
+              leap: { material: PAPER, texture: t, ability: { type: leap, power: 2, cooldown: 5 } }
+              leap_default: { material: PAPER, texture: t, ability: { type: leap } }
+              heal: { material: PAPER, texture: t, ability: { type: heal, amount: 8 } }
+              speed: { material: PAPER, texture: t, ability: { type: effect, effect: speed, level: 2, duration: 30 } }
+              strong: { material: PAPER, texture: t, ability: { type: effect, effect: "minecraft:strength" } }
+              fire: { material: PAPER, texture: t, ability: { type: fireball, incendiary: true } }
+              bolt: { material: PAPER, texture: t, ability: { type: lightning, distance: 25, damage: false } }
+              bolt_default: { material: PAPER, texture: t, ability: { type: lightning } }
+            """,
+            "t",
+        )
+        val abilities = effectLoader(contents).load().single().items.associate { it.key to it.ability!! }
+        assertEquals(ItemAbility(AbilityType.LEAP, 5.0, power = 2.0), abilities["leap"])
+        assertEquals(ItemAbility(AbilityType.LEAP, 10.0, power = 1.5), abilities["leap_default"])
+        assertEquals(ItemAbility(AbilityType.HEAL, 10.0, amount = 8.0), abilities["heal"])
+        assertEquals(ItemAbility(AbilityType.EFFECT, 10.0, effect = NamespacedKey.minecraft("speed"), level = 2, durationSeconds = 30.0), abilities["speed"])
+        assertEquals(ItemAbility(AbilityType.EFFECT, 10.0, effect = NamespacedKey.minecraft("strength"), level = 1, durationSeconds = 10.0), abilities["strong"])
+        assertEquals(ItemAbility(AbilityType.FIREBALL, 10.0, incendiary = true), abilities["fire"])
+        assertEquals(ItemAbility(AbilityType.LIGHTNING, 10.0, distance = 25.0, damage = false), abilities["bolt"])
+        assertEquals(ItemAbility(AbilityType.LIGHTNING, 10.0, distance = 20.0, damage = true), abilities["bolt_default"])
+
+        fun error(ability: String): String {
+            val folder = root.resolve("e-${System.nanoTime()}")
+            pack(folder, "ns", "items:\n  a:\n    material: PAPER\n    texture: t\n    ability: $ability\n", "t")
+            return assertFailsWith<ContentPackException> { effectLoader(folder).load() }.message!!
+        }
+        assertContains(error("{ type: effect }"), "ability.effect is required")
+        assertContains(error("{ type: effect, effect: flying }"), "unknown effect 'flying'")
+        assertContains(error("{ type: effect, effect: speed, level: 0 }"), "ability.level must be 1 to 255")
+        assertContains(error("{ type: leap, power: 9 }"), "ability.power must be 0.1 to 4")
+        assertContains(error("{ type: heal, distance: 3 }"), "ability.distance: not an option for heal (options: type, cooldown, cooldown-message, amount)")
+        assertContains(error("{ type: nuke }"), "(teleport, leap, heal, effect, fireball, lightning)")
+    }
+
+    @Test
+    fun `leap always lifts and keeps the look direction`() {
+        val flat = Abilities.leapVelocity(org.bukkit.util.Vector(0.0, 0.0, 1.0), 1.5)
+        assertEquals(1.5, flat.z, 1e-9)
+        assertEquals(0.4, flat.y, 1e-9, "leaping on flat ground still lifts off")
+        val down = Abilities.leapVelocity(org.bukkit.util.Vector(0.0, -1.0, 1.0), 2.0)
+        assertEquals(0.4, down.y, 1e-9, "looking down never pushes into the ground")
+        val up = Abilities.leapVelocity(org.bukkit.util.Vector(0.0, 1.0, 0.0), 1.0)
+        assertEquals(1.4, up.y, 1e-9, "straight up is capped at power + 0.4")
+    }
+
+    @Test
+    fun `a dash stops at the last clear step and never skips over a wall`() {
+        assertEquals(5.0, Abilities.farthestClear(5.0) { true })
+        // A wall 2.3 blocks ahead blocks every step from 2.25 on: stop at 2.0.
+        assertEquals(2.0, Abilities.farthestClear(5.0) { it < 2.25 })
+        // A thin wall followed by open space: still stops in front of it.
+        assertEquals(1.0, Abilities.farthestClear(5.0) { it < 1.2 || it > 1.6 })
+        assertEquals(0.0, Abilities.farthestClear(5.0) { false })
+        // Non-multiple distances still reach the full length.
+        assertEquals(5.1, Abilities.farthestClear(5.1) { true })
+    }
+
+    @Test
+    fun `cooldown text rounds up and says second for one`() {
+        assertEquals(15, Abilities.secondsLeft(14_200_000_000))
+        assertEquals(1, Abilities.secondsLeft(200_000_000))
+        assertEquals("&cWait 15 seconds", Abilities.cooldownText(ItemAbility.DEFAULT_COOLDOWN_MESSAGE, 15))
+        assertEquals("&cWait 1 second", Abilities.cooldownText(ItemAbility.DEFAULT_COOLDOWN_MESSAGE, 1))
+        assertEquals("&eHold on, 3s", Abilities.cooldownText("&eHold on, {seconds}s", 3))
+    }
 }
