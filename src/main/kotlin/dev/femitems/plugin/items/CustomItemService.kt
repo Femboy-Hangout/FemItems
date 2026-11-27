@@ -39,6 +39,7 @@ class LoadedItems(
     val templates: Map<String, ItemStack>,
     val resourcePack: BuiltResourcePack?,
     val settings: ResourcePackSettings,
+    val included: IncludedFiles = IncludedFiles.EMPTY,
 ) {
     val count: Int get() = definitions.size
 
@@ -72,12 +73,20 @@ class CustomItemService(private val plugin: JavaPlugin) : Listener {
             for (item in pack.items) definitions[item.id] = item
         }
         val templates = definitions.mapValues { (_, definition) -> build(definition) }
-        val resourcePack = if (packs.isNotEmpty()) ResourcePackBuilder.build(packs) else null
+        val included = IncludedFiles.load(includeFolder)
+        val resourcePack = if (packs.isNotEmpty() || included.files.isNotEmpty()) {
+            ResourcePackBuilder.build(packs, extra = included)
+        } else {
+            null
+        }
         // Always keep the current pack on disk: this is the file to upload for mode: external.
         Files.createDirectories(packFile.parent)
         if (resourcePack != null) Files.write(packFile, resourcePack.bytes) else Files.deleteIfExists(packFile)
-        return LoadedItems(packs, definitions, templates, resourcePack, settings)
+        return LoadedItems(packs, definitions, templates, resourcePack, settings, included)
     }
+
+    /** Raw pack files (music disc sounds, sounds.json, lang...) added to the built pack as-is. */
+    val includeFolder: Path get() = plugin.dataFolder.toPath().resolve("resourcepack").resolve("include")
 
     /** The built pack, written on every load (upload this file for `mode: external`). */
     val packFile: Path get() = plugin.dataFolder.toPath().resolve("resourcepack").resolve("femitems-items.zip")
@@ -102,7 +111,13 @@ class CustomItemService(private val plugin: JavaPlugin) : Listener {
             packServer.stop()
         }
         if (pack != null) {
-            plugin.logger.info("Built custom item resource pack (${loaded.count} items, ${pack.size / 1024} KiB, sha1 ${pack.sha1}) at $packFile.")
+            val extra = loaded.included.files.size.takeIf { it > 0 }?.let { ", $it included files" }.orEmpty()
+            plugin.logger.info("Built custom item resource pack (${loaded.count} items$extra, ${pack.size / 1024} KiB, sha1 ${pack.sha1}) at $packFile.")
+        }
+        if (loaded.included.ignored.isNotEmpty()) {
+            plugin.logger.warning(
+                "Ignored files in resourcepack/include (only an assets/ folder is used): ${loaded.included.ignored.joinToString(", ")}",
+            )
         }
         if (loaded.settings.mode == PackMode.EXTERNAL) {
             // Until checkExternalPack verifies the link for this exact pack, nothing is sent.

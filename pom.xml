@@ -5,7 +5,7 @@
 
     <groupId>dev.femitems</groupId>
     <artifactId>femitems</artifactId>
-    <version>2.5.1</version>
+    <version>2.6.0</version>
     <name>FemItems</name>
     <description>Paper and Folia plugin for reloadable custom mob drops, crafting recipes, and NBS jukebox music.</description>
 

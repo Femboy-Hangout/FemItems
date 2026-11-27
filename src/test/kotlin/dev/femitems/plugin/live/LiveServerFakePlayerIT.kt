@@ -803,6 +803,12 @@ class LiveServerFakePlayerIT {
         }
         writePng(pack.resolve("textures/armor/ruby_layer_1.png"), 64, 32, 0xC0102A)
         writePng(pack.resolve("textures/armor/ruby_layer_2.png"), 64, 32, 0xC0102A)
+        // Raw pack files (like music disc sounds) dropped into resourcepack/include ride along in the built pack.
+        val include = server.pluginDataDir().resolve("resourcepack").resolve("include")
+        Files.createDirectories(include.resolve("assets/minecraft/sounds/records"))
+        Files.write(include.resolve("assets/minecraft/sounds/records/pigstep.ogg"), byteArrayOf(79, 103, 103, 83))
+        Files.writeString(include.resolve("assets/minecraft/sounds.json"), """{"music_disc.pigstep":{"sounds":[{"name":"records/pigstep","stream":true}]}}""")
+        Files.writeString(include.resolve("pack.mcmeta"), "{}") // ignored: FemItems writes its own
         // A stand-in for mc-packs.net: serves whatever zip was last "uploaded" (404 until then).
         val uploaded = java.util.concurrent.atomic.AtomicReference<ByteArray?>(null)
         val packHost = com.sun.net.httpserver.HttpServer.create(java.net.InetSocketAddress("127.0.0.1", 0), 0)
@@ -860,6 +866,8 @@ class LiveServerFakePlayerIT {
                 "assets/livetest/equipment/ruby.json",
                 "assets/livetest/textures/entity/equipment/humanoid/ruby.png",
                 "assets/livetest/textures/entity/equipment/humanoid_leggings/ruby.png",
+                "assets/minecraft/sounds/records/pigstep.ogg",
+                "assets/minecraft/sounds.json",
             )) {
                 assertTrue(entry in entries, "[$platform] Resource pack is missing $entry: $entries")
             }

@@ -534,4 +534,53 @@ class CustomItemsTest {
         pack(contents, "ns", "items:\n  a:\n    material: PAPER\n    texture: t\n    category: ${"x".repeat(33)}\n", "t")
         assertContains(assertFailsWith<ContentPackException> { loader(contents).load() }.message!!, "category must be at most 32 characters")
     }
+
+    // ------------------------------------------------------------------ resourcepack/include
+
+    private fun write(root: Path, path: String, text: String) {
+        val file = root.resolve(path)
+        Files.createDirectories(file.parent)
+        Files.writeString(file, text)
+    }
+
+    @Test
+    fun `included files (music disc sounds, lang) are added to the pack as-is`(@TempDir root: Path) {
+        platinum(root.resolve("contents"))
+        val include = root.resolve("include")
+        write(include, "assets/minecraft/sounds/records/pigstep.ogg", "ogg-bytes")
+        write(include, "assets/minecraft/sounds.json", """{"music_disc.pigstep":{"sounds":[{"name":"records/pigstep","stream":true}]}}""")
+        write(include, "assets/minecraft/lang/en_us.json", """{"item.minecraft.music_disc_pigstep":"My Song"}""")
+        write(include, "pack.mcmeta", "{}")      // the source pack's own metadata: ignored, FemItems writes its own
+        write(include, "mctools.json", "{}")
+        val included = IncludedFiles.load(include)
+        assertEquals(listOf("mctools.json", "pack.mcmeta"), included.ignored)
+        assertEquals(3, included.files.size)
+
+        val packs = loader(root.resolve("contents")).load()
+        val files = ResourcePackBuilder.entries(packs, extra = included)
+        assertEquals("ogg-bytes", String(files.getValue("assets/minecraft/sounds/records/pigstep.ogg")))
+        assertContains(String(files.getValue("assets/minecraft/sounds.json")), "music_disc.pigstep")
+        assertContains(String(files.getValue("pack.mcmeta")), "\"pack_format\":97", message = "FemItems' own pack.mcmeta is kept")
+        assertTrue(files.containsKey("assets/blossom_studios/items/platinum_sword.json"), "custom items are still in the pack")
+
+        val withSounds = ResourcePackBuilder.build(packs, extra = included)
+        assertEquals(withSounds.sha1, ResourcePackBuilder.build(packs, extra = IncludedFiles.load(include)).sha1, "deterministic")
+        assertNotEquals(ResourcePackBuilder.build(packs).sha1, withSounds.sha1)
+        assertEquals(IncludedFiles.EMPTY.files, IncludedFiles.load(root.resolve("missing")).files)
+    }
+
+    @Test
+    fun `included files must be loadable and must not overwrite generated item files`(@TempDir root: Path) {
+        val upper = root.resolve("upper")
+        write(upper, "assets/minecraft/sounds/records/MySong.ogg", "x")
+        assertContains(assertFailsWith<ContentPackException> { IncludedFiles.load(upper) }.message!!, "only loads lowercase paths")
+
+        platinum(root.resolve("contents"))
+        val clash = root.resolve("clash")
+        write(clash, "assets/blossom_studios/items/platinum_sword.json", "{}")
+        val error = assertFailsWith<ContentPackException> {
+            ResourcePackBuilder.entries(loader(root.resolve("contents")).load(), extra = IncludedFiles.load(clash))
+        }
+        assertContains(error.message!!, "assets/blossom_studios/items/platinum_sword.json clashes with a file FemItems generates")
+    }
 }

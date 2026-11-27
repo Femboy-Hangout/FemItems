@@ -1,8 +1,11 @@
 package dev.femitems.plugin.items
 
 import java.io.ByteArrayOutputStream
+import java.io.File
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
+import java.nio.file.LinkOption
+import java.nio.file.Path
 import java.security.MessageDigest
 import java.util.TreeMap
 import java.util.zip.ZipEntry
@@ -29,11 +32,11 @@ object ResourcePackBuilder {
     const val PACK_FORMAT = 97
     private const val FIXED_TIME = 315532800000L // 1980-01-01, the earliest zip timestamp
 
-    fun build(packs: List<ContentPack>, description: String = "FemItems custom items"): BuiltResourcePack =
-        BuiltResourcePack(zip(entries(packs, description)))
+    fun build(packs: List<ContentPack>, description: String = "FemItems custom items", extra: IncludedFiles = IncludedFiles.EMPTY): BuiltResourcePack =
+        BuiltResourcePack(zip(entries(packs, description, extra)))
 
-    /** All pack files as path -> bytes; exposed for tests. */
-    fun entries(packs: List<ContentPack>, description: String = "FemItems custom items"): Map<String, ByteArray> {
+    /** All pack files as path -> bytes; exposed for tests. [extra] files are added as-is (see [IncludedFiles]). */
+    fun entries(packs: List<ContentPack>, description: String = "FemItems custom items", extra: IncludedFiles = IncludedFiles.EMPTY): Map<String, ByteArray> {
         val files = TreeMap<String, ByteArray>()
         files["pack.mcmeta"] = json(
             """{"pack":{"description":${quote(description)},"pack_format":$PACK_FORMAT,"min_format":$PACK_FORMAT,"max_format":$PACK_FORMAT}}""",
@@ -60,6 +63,10 @@ object ResourcePackBuilder {
                 }
                 files["assets/$ns/equipment/${equipment.key}.json"] = json("""{"layers":{${layers.joinToString(",")}}}""")
             }
+        }
+        for ((path, data) in extra.files) {
+            if (path in files) throw ContentPackException(extra.fileFor(path), "resourcepack/include/$path clashes with a file FemItems generates for custom items; rename or remove it")
+            files[path] = data
         }
         return files
     }
@@ -96,5 +103,55 @@ object ResourcePackBuilder {
             }
         }
         append('"')
+    }
+}
+
+/**
+ * Raw resource pack files from `resourcepack/include/` (e.g. music disc sounds, `sounds.json`, lang
+ * overrides), added unchanged to every pack FemItems builds. Only an `assets/...` tree is used: the pack's
+ * own `pack.mcmeta`/`pack.png` and anything else at the top level are ignored and listed in [ignored].
+ */
+class IncludedFiles(val folder: Path?, val files: Map<String, ByteArray>, val ignored: List<String>) {
+    val size: Long get() = files.values.sumOf { it.size.toLong() }
+
+    /** Errors point at the include folder (not a binary file the error-line lookup would try to read). */
+    fun fileFor(@Suppress("UNUSED_PARAMETER") path: String): File = folder?.toFile() ?: File("resourcepack/include")
+
+    companion object {
+        val EMPTY = IncludedFiles(null, emptyMap(), emptyList())
+
+        /** The client refuses server packs larger than this. */
+        const val MAX_TOTAL_BYTES = 250L * 1024 * 1024
+        private val ASSET_PATH = Regex("assets/[a-z0-9_.-]+/[a-z0-9_./-]+")
+
+        /** Reads [folder] (missing = nothing included). Throws [ContentPackException] for unusable files. */
+        fun load(folder: Path): IncludedFiles {
+            if (!Files.isDirectory(folder)) return EMPTY
+            val files = TreeMap<String, ByteArray>()
+            val ignored = ArrayList<String>()
+            var total = 0L
+            val paths = Files.walk(folder).use { stream ->
+                stream.filter { Files.isRegularFile(it, LinkOption.NOFOLLOW_LINKS) }.sorted().toList()
+            }
+            for (path in paths) {
+                val relative = folder.relativize(path).joinToString("/") { it.toString() }
+                if (!relative.startsWith("assets/")) {
+                    ignored += relative
+                    continue
+                }
+                if (!ASSET_PATH.matches(relative) || relative.split('/').any { it == ".." || it == "." || it.isEmpty() }) {
+                    throw ContentPackException(
+                        folder.toFile(),
+                        "resourcepack/include/$relative: Minecraft only loads lowercase paths (a-z, 0-9, _ . - /); rename it",
+                    )
+                }
+                total += Files.size(path)
+                if (total > MAX_TOTAL_BYTES) {
+                    throw ContentPackException(folder.toFile(), "resourcepack/include is larger than 250 MB, which clients refuse to download")
+                }
+                files[relative] = Files.readAllBytes(path)
+            }
+            return IncludedFiles(folder, files, ignored)
+        }
     }
 }

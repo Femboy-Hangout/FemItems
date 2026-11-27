@@ -195,6 +195,17 @@ resource-pack:
 
 `required: true` disconnects players who decline the pack; `prompt` is the message shown with the download prompt. `/femitems pack` shows the current pack status and re-checks the uploaded link.
 
+**Adding other files (music discs, sounds, translations).** Anything in `plugins/FemItems/resourcepack/include/` that is under an `assets/` folder is copied into the built pack unchanged. That way one pack carries both the custom items and, for example, replaced music disc songs:
+
+```
+plugins/FemItems/resourcepack/include/
+  assets/minecraft/sounds.json                  # "music_disc.pigstep": { "sounds": [ { "name": "records/pigstep", "stream": true } ] }
+  assets/minecraft/sounds/records/pigstep.ogg   # the song (Ogg Vorbis)
+  assets/minecraft/lang/en_us.json              # "item.minecraft.music_disc_pigstep.desc": "Artist - Song"
+```
+
+Copy the `assets` folder of an existing pack (for example one made with a music disc pack generator) in as-is. Its `pack.mcmeta`, `pack.png` and other top-level files are ignored, and FemItems names them in the log. Paths must be lowercase, the same rule Minecraft itself follows. A file that would replace one FemItems generates for a custom item is reported as an error. After changing these files, run `/femitems reload` and upload the new `femitems-items.zip` as above. Keep the whole pack under 100 MB if it's hosted on GitHub, which rejects larger files.
+
 ### Converting ItemsAdder packs
 
 Most marketplace packs ship an ItemsAdder version. `import-itemsadder.py` (kept outside this repository, with the converted Platinum Set and Weapons Pack as templates) converts an ItemsAdder `contents/<namespace>` folder into a FemItems content pack plus a `recipes.yml` to paste into `config.yml`. Placeable custom blocks and ore generation are not supported yet; such blocks are imported as plain items.
