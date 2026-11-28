@@ -29,6 +29,11 @@ object Messages {
         ),
     )
 
+    /** Drops/recipes left out of a reload because they name a custom item that isn't loaded; hover lists them. */
+    fun skippedMissing(entries: List<String>): Component =
+        render("skipped-missing", value("count", entries.size))
+            .hoverEvent(HoverEvent.showText(Component.text(entries.joinToString("\n"))))
+
     fun customItems(ids: List<String>): Component = render(
         "custom-items",
         value("count", ids.size),

@@ -1341,6 +1341,35 @@ class LiveServerFakePlayerIT {
         )
         assertTrue(!conditional(op, "execute if items entity @s container.* minecraft:dirt"), "[$platform] Ordinary items should still drop")
         server.sendConsoleCommand("kill @e[type=minecraft:item]")
+
+        // C17. A recipe using a custom item that isn't loaded is skipped and reported; the reload still succeeds.
+        val configFile = server.pluginConfigFile()
+        val configBeforeGhost = Files.readString(configFile)
+        Files.writeString(
+            configFile,
+            configBeforeGhost.replaceFirst(
+                "recipes:\n",
+                "recipes:\n  ghost_recipe:\n    type: shapeless\n    ingredients: [livetest:ghost]\n    result: { material: STONE }\n",
+            ),
+        )
+        mark = op.chatCount()
+        val logBeforeGhost = server.readLog().length
+        op.sendCommand("femitems reload")
+        op.awaitChatContaining("[FemItems] Config reloaded.", sinceIndex = mark)
+        op.awaitChatContaining("[FemItems] 1 drop(s)/recipe(s) skipped: they use custom items that aren't loaded.", sinceIndex = mark)
+        val ghostLog = server.readLog().substring(logBeforeGhost)
+        assertTrue(
+            ghostLog.contains("recipes.ghost_recipe skipped: Unknown custom item in recipes.ghost_recipe: livetest:ghost"),
+            "[$platform] Expected the skipped recipe in the console:\n$ghostLog",
+        )
+        assertTrue(
+            ghostLog.contains("Loaded 1 mob rules and 2 recipes."),
+            "[$platform] The other drops and recipes should still load when one recipe is skipped:\n$ghostLog",
+        )
+        Files.writeString(configFile, configBeforeGhost)
+        mark = op.chatCount()
+        op.sendCommand("femitems reload")
+        op.awaitChatContaining("[FemItems] Config reloaded.", sinceIndex = mark)
         op.selectHotbarSlot(0)
     }
 

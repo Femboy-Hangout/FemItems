@@ -105,6 +105,9 @@ class MessagesTest {
             "[FemItems] ✦ Frost Jarl dropped Frost Axe!",
             plain(Messages.rareDrop(null, Component.text("Frost Axe"), Component.text("Frost Jarl"))),
         )
+        val skipped = Messages.skippedMissing(listOf("recipes.a skipped: x", "recipes.b skipped: y"))
+        assertEquals("[FemItems] 2 drop(s)/recipe(s) skipped: they use custom items that aren't loaded. (hover for details)", plain(skipped))
+        assertEquals("recipes.a skipped: x\nrecipes.b skipped: y", plain(skipped.hoverEvent()!!.value() as Component))
         assertEquals("[FemJukebox] Shuffle enabled.", plain(JukeboxMessages.shuffle(true)))
         assertEquals("[FemJukebox] Playback volume: 50%", plain(JukeboxMessages.volume(0.5f)))
         assertEquals("[FemJukebox] Songs (0): none", plain(JukeboxMessages.songs(emptyList())))

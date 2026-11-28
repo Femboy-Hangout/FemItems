@@ -445,10 +445,47 @@ class CustomItemsTest {
     }
 
     @Test
-    fun `references to missing custom items and bad smelting recipes are errors`() {
+    fun `drops and recipes with missing custom items are skipped while the rest still loads`() {
+        val parsed = parse(
+            """
+            mobs:
+              boss:
+                entity: ZOMBIE
+                entity-tag: t
+                drops:
+                  - { item: ghost:sword, chance: 0.12 }
+                  - { material: DIAMOND, min: 2, max: 2 }
+            recipes:
+              uses_ghost:
+                type: shapeless
+                ingredients: [ghost:item]
+                result: { material: STONE }
+              makes_ghost:
+                type: shapeless
+                ingredients: [STONE]
+                result: { item: ghost:item }
+              fine:
+                type: shapeless
+                ingredients: [DIRT]
+                result: { material: STONE }
+            """,
+        )
+        assertEquals(listOf(Material.DIAMOND), parsed.mobRules.single().drops.map { it.material }, "only the missing drop is left out")
+        assertEquals(listOf("fine"), parsed.recipes.map { it.id })
+        assertEquals(3, parsed.skipped.size)
+        assertContains(parsed.skipped[0], "mobs.boss")
+        assertContains(parsed.skipped[0], "ghost:sword")
+        assertContains(parsed.skipped[1], "recipes.uses_ghost skipped: Unknown custom item in recipes.uses_ghost: ghost:item")
+        assertContains(parsed.skipped[2], "recipes.makes_ghost skipped")
+        // Reading drops on their own (no skip list) still reports it as an error.
+        assertFailsWith<dev.femitems.plugin.MissingCustomItemException> {
+            ConfigParser.readMobRules(YamlConfiguration().apply { loadFromString("mobs:\n  m:\n    entity: ZOMBIE\n    entity-tag: t\n    drops:\n      - { item: ghost:x }\n") })
+        }
+    }
+
+    @Test
+    fun `bad smelting recipes and invalid custom item use are errors`() {
         fun error(yaml: String) = assertFailsWith<IllegalArgumentException> { parse(yaml) }.message!!
-        assertContains(error("recipes:\n  r:\n    type: shapeless\n    ingredients: [ghost:item]\n    result: { material: STONE }\n"), "Unknown custom item in recipes.r: ghost:item")
-        assertContains(error("recipes:\n  r:\n    type: shapeless\n    ingredients: [STONE]\n    result: { item: ghost:item }\n"), "Unknown custom item")
         assertContains(error("recipes:\n  r:\n    type: shapeless\n    ingredients: [STONE]\n    result: { item: blossom_studios:platinum_sword, amount: 2 }\n"), "invalid amount")
         assertContains(error("recipes:\n  r:\n    type: smelting\n    result: { material: STONE }\n"), "ingredient is required")
         assertContains(error("recipes:\n  r:\n    type: smelting\n    ingredient: COBBLESTONE\n    machines: [oven]\n    result: { material: STONE }\n"), "unknown machine 'oven'")

@@ -73,7 +73,7 @@ mobs:
   # ---- FemMobs bosses and their minions (custom weapons are rare: 12% per boss kill) ----
   # The boss weapon drops are commented out here because they need the custom: content pack
   # (contents/custom/items.yml). With it installed, remove the '# ' in front of each '- { item: custom:...' line.
-  # A drop or recipe naming a custom item that doesn't exist stops all of config.yml from loading.
+  # A drop or recipe naming a custom item that isn't loaded is skipped (and named in the console); the rest still loads.
   molten_warden:
     entity: HUSK
     entity-tag: "forsaken.molten_warden"

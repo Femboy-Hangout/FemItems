@@ -81,6 +81,8 @@ data class CookingRecipeDefinition(
 data class ParsedConfig(
     val mobRules: List<MobRule>,
     val recipes: List<RecipeDefinition>,
+    /** Drops and recipes left out because they name a custom item that isn't loaded. */
+    val skipped: List<String> = emptyList(),
 )
 
 data class RolledDrop(

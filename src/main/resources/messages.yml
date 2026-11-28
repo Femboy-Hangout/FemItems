@@ -14,6 +14,8 @@ items:
   reloaded: "<color:#7ee8a2>Config reloaded.</color> <color:#a1a1aa>(<rules> mob rules, <recipes> recipes<items>)</color>"
   # <count>
   reloaded-custom-items: ", <count> custom items"
+  # After a reload: drops/recipes left out because they use a custom item that isn't loaded (hover lists them). <count>.
+  skipped-missing: "<color:#ff6b81><count> drop(s)/recipe(s) skipped: they use custom items that aren't loaded.</color> <color:#a1a1aa><italic>(hover for details)</italic></color>"
   reload-in-progress: "<color:#a1a1aa>A reload is already in progress; please wait.</color>"
 
   # A reload failed. Hovering the message shows the exact problem. <line>; <file> is the content pack file.

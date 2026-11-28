@@ -67,3 +67,7 @@ Every chat message (FemItems and jukebox) is a MiniMessage text in `src/main/res
 ## Item perks (2.11.0)
 
 `ItemPerkService.kt`: **refresh** (items carry `item_version` = `CustomItemService.fingerprint(definition)`, a hash of the data class `toString()`; `CustomItemService.refreshed()` rebuilds an out-of-date copy from the template, keeping amount, enchants, damage, repair cost, trim, an anvil rename (detected via `item_base_name`), and foreign PDC) on join, after reload (`refreshOnline`, per-player scheduler), held, pickup, inventory close; **soulbound** (`PlayerDeathEvent.itemsToKeep`); **on-hit** (light, capped options; full swing read on `PrePlayerAttackEntityEvent` because vanilla resets the charge before the damage event). `announce: true` broadcasts `items.rare-drop` from `onMobDeath`. Item names/lore accept MiniMessage when a line contains a tag. Fake client now auto-respawns (`deathCount()`). Live steps C13–C16.
+
+## Missing custom items are skipped (2.12.0)
+
+A drop or recipe naming a custom item that isn't loaded throws `MissingCustomItemException` (in `ConfigParser.customItemId`); `ConfigParser.parse` catches it per drop / per recipe and records it in `ParsedConfig.skipped` instead of failing all of config.yml (which, at startup, used to leave no recipes, drops or custom items at all). `readMobRules`/`readRecipes` called without a skip list still throw. Skips are logged and reported to the reloading sender (`items.skipped-missing`, hover lists them). Other config errors still fail the whole reload. Live step C17.

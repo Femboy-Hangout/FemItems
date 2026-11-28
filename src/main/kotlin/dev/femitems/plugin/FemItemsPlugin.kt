@@ -258,6 +258,8 @@ class FemItemsPlugin : JavaPlugin(), Listener {
         val recipes: List<LoadedRecipe>,
         val definitionCount: Int,
         val items: LoadedItems,
+        /** Drops/recipes left out because they name a custom item that isn't loaded. */
+        val skipped: List<String> = emptyList(),
     )
 
     private class RecipeSwap(val registered: Set<NamespacedKey>, val added: Set<NamespacedKey>)
@@ -310,6 +312,7 @@ class FemItemsPlugin : JavaPlugin(), Listener {
                     applyContent(content)
                     perks.refreshOnline()
                     sender.sendMessage(Messages.reloaded(content.mobRules.size, content.definitionCount, content.items.count))
+                    if (content.skipped.isNotEmpty()) sender.sendMessage(Messages.skippedMissing(content.skipped))
                     customItems.checkExternalPack(sender::sendMessage)
                 } catch (exception: Exception) {
                     logger.log(Level.SEVERE, "Failed to apply reloaded config", exception)
@@ -351,7 +354,9 @@ class FemItemsPlugin : JavaPlugin(), Listener {
             // Build every Bukkit recipe before touching live state, so a bad recipe fails the whole
             // reload up front instead of leaving the server half-reloaded after reporting success.
             val recipes = parsed.recipes.flatMap { definition -> toBukkitRecipes(definition, items) }
-            LoadResult.Loaded(LoadedContent(parsed.mobRules, recipes, parsed.recipes.size, items))
+            // A drop or recipe naming a missing custom item is left out; everything else still loads.
+            for (entry in parsed.skipped) logger.warning("config.yml: $entry. Everything else in config.yml still loads.")
+            LoadResult.Loaded(LoadedContent(parsed.mobRules, recipes, parsed.recipes.size, items, parsed.skipped))
         } catch (exception: ContentPackException) {
             val line = ConfigParser.findErrorLine(exception, exception.file).takeIf { it > 0 }
             val detail = ConfigParser.conciseError(exception)
