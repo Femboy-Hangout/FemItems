@@ -550,14 +550,28 @@ class FemItemsPlugin : JavaPlugin(), Listener {
         val drops = ConfigParser.rollDrops(rules, entity.type, customNamePlain, scoreboardTags = entity.scoreboardTags)
         for (drop in drops) {
             val template = if (drop.customItem != null) {
-                customItems.create(drop.customItem) ?: continue
+                val item = customItems.create(drop.customItem) ?: continue
+                if (drop.enchants.isNotEmpty()) addEnchants(item, drop.enchants)
+                item
             } else if (drop.randomEnchantment) {
                 createRandomEnchantedBook(drop.name)
             } else {
-                createItemStack(ItemDefinition(material = drop.material, amount = 1, name = drop.name))
+                createItemStack(ItemDefinition(material = drop.material, amount = 1, name = drop.name, enchants = drop.enchants))
             }
             for (stackSize in ConfigParser.splitIntoStacks(drop.amount, template.maxStackSize)) {
                 event.drops.add(template.clone().apply { amount = stackSize })
+            }
+        }
+    }
+
+    /** Adds [enchants] to [item] (as stored enchantments on enchanted books), on top of what it already has. */
+    private fun addEnchants(item: ItemStack, enchants: Map<NamespacedKey, Int>) {
+        val registry = RegistryAccess.registryAccess().getRegistry(RegistryKey.ENCHANTMENT)
+        item.editMeta { meta ->
+            for ((key, level) in enchants) {
+                val enchantment = registry.get(key) ?: continue
+                if (meta is EnchantmentStorageMeta) meta.addStoredEnchant(enchantment, level, true)
+                else meta.addEnchant(enchantment, level, true)
             }
         }
     }

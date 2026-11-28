@@ -9,7 +9,9 @@ import org.junit.jupiter.api.assertThrows
 import java.io.InputStreamReader
 import java.nio.charset.StandardCharsets
 import kotlin.random.Random
+import kotlin.test.assertContains
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
@@ -391,6 +393,37 @@ class ConfigParserTest {
         ).single()
         assertEquals(Material.ENCHANTED_BOOK, rolled.material)
         assertTrue(rolled.randomEnchantment)
+    }
+
+    @Test
+    fun `drops can carry fixed enchantments`() {
+        val known = setOf("sharpness", "unbreaking", "looting", "mending")
+        val validator = { key: NamespacedKey -> key.namespace == "minecraft" && key.key in known }
+        fun rules(drops: String) = ConfigParser.readMobRules(
+            YamlConfiguration().apply {
+                loadFromString("mobs:\n  champion:\n    entity: ZOMBIE\n    entity-tag: forsaken.champion\n    drops:\n$drops")
+            },
+            enchantmentValidator = validator,
+        )
+        val rule = rules(
+            """      - { material: DIAMOND_SWORD, min: 1, max: 1, chance: 1.0, name: "&6Champion's Blade", enchants: { sharpness: 4, unbreaking: "3", "minecraft:looting": 2 } }
+      - { material: ENCHANTED_BOOK, chance: 1.0, enchants: { mending: 1 } }
+      - { material: BONE, chance: 1.0 }
+""",
+        ).single()
+        val expected = mapOf(NamespacedKey.minecraft("sharpness") to 4, NamespacedKey.minecraft("unbreaking") to 3, NamespacedKey.minecraft("looting") to 2)
+        assertEquals(expected, rule.drops[0].enchants)
+        assertEquals(mapOf(NamespacedKey.minecraft("mending") to 1), rule.drops[1].enchants)
+        assertEquals(emptyMap(), rule.drops[2].enchants)
+        val rolled = ConfigParser.rollDrops(listOf(rule), EntityType.ZOMBIE, null, Random(1), setOf("forsaken.champion"))
+        assertEquals(expected, rolled.first { it.material == Material.DIAMOND_SWORD }.enchants, "rolled drops keep their enchantments")
+
+        fun error(drop: String) = assertFailsWith<IllegalArgumentException> { rules("      - $drop\n") }.message!!
+        assertContains(error("{ material: DIAMOND_SWORD, enchants: { sharpnes: 4 } }"), "Unknown enchantment at mobs.champion.drops.enchants.sharpnes")
+        assertContains(error("{ material: DIAMOND_SWORD, enchants: { sharpness: 0 } }"), "Enchant level must be at least 1")
+        assertContains(error("{ material: DIAMOND_SWORD, enchants: { sharpness: lots } }"), "must be a whole number")
+        assertContains(error("{ material: DIAMOND_SWORD, enchants: sharpness }"), "enchants must be a map like { sharpness: 4 }")
+        assertContains(error("{ material: ENCHANTED_BOOK, random-enchantment: true, enchants: { mending: 1 } }"), "either enchants or random-enchantment")
     }
 
     @Test

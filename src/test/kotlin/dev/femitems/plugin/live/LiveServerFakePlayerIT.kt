@@ -1,6 +1,7 @@
 package dev.femitems.plugin.live
 
 import org.junit.jupiter.api.Assumptions.assumeTrue
+import org.geysermc.mcprotocollib.protocol.data.game.item.component.DataComponentTypes
 import org.junit.jupiter.api.Test
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
@@ -832,6 +833,7 @@ class LiveServerFakePlayerIT {
                 entity-tag: femitems.test_ruby
                 drops:
                   - { item: livetest:raw_ruby, min: 1, max: 1, chance: 1.0 }
+                  - { material: DIAMOND_SWORD, min: 1, max: 1, chance: 1.0, name: "&6Champion's Blade", enchants: { sharpness: 4, unbreaking: 3 } }
             recipes:
               ruby_sword:
                 type: shapeless
@@ -1039,6 +1041,16 @@ class LiveServerFakePlayerIT {
         op.awaitItemMatching("raw ruby dropped by the tagged zombie", sinceIndex = opItemsBeforeKill) { item ->
             item.dataComponentsPatch?.toString().orEmpty().contains("livetest:raw_ruby")
         }
+        // The same mob also drops a named sword with fixed enchantments (Sharpness IV, Unbreaking III).
+        val blade = op.awaitItemMatching("enchanted Champion's Blade dropped by the tagged zombie", sinceIndex = opItemsBeforeKill) { item ->
+            item.dataComponentsPatch?.get(DataComponentTypes.ENCHANTMENTS) != null &&
+                item.dataComponentsPatch.toString().contains("Champion's Blade")
+        }
+        assertEquals(
+            listOf(3, 4),
+            blade.dataComponentsPatch!!.get(DataComponentTypes.ENCHANTMENTS)!!.enchantments.values.sorted(),
+            "[$platform] The dropped sword does not carry exactly Sharpness IV + Unbreaking III: ${blade.dataComponentsPatch}",
+        )
 
         // C8. Holding the crafted ruby sword (hotbar 1) applies its stats, and hitting a mob deals exactly
         // `attack-damage: 12`, not the diamond sword's 7.

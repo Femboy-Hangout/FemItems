@@ -35,7 +35,7 @@ object ConfigParser {
         customItems: Map<String, Material> = emptyMap(),
         customStackSize: (String) -> Int = { 64 },
     ): ParsedConfig {
-        val mobRules = readMobRules(config, customItems)
+        val mobRules = readMobRules(config, customItems, enchantmentValidator)
         val recipes = readRecipes(config, maxStackSizeProvider, enchantmentValidator, customItems, customStackSize)
         return ParsedConfig(mobRules = mobRules, recipes = recipes)
     }
@@ -57,7 +57,11 @@ object ConfigParser {
         return Ingredient.Vanilla(material)
     }
 
-    fun readMobRules(config: YamlConfiguration, customItems: Map<String, Material> = emptyMap()): List<MobRule> {
+    fun readMobRules(
+        config: YamlConfiguration,
+        customItems: Map<String, Material> = emptyMap(),
+        enchantmentValidator: (NamespacedKey) -> Boolean = ::defaultEnchantmentExists,
+    ): List<MobRule> {
         val mobs = config.getConfigurationSection("mobs") ?: return emptyList()
         val rules = ArrayList<MobRule>()
 
@@ -114,7 +118,15 @@ object ConfigParser {
                 if (randomEnchantment && material != Material.ENCHANTED_BOOK) {
                     throw IllegalArgumentException("mobs.$id.drops.random-enchantment requires material ENCHANTED_BOOK")
                 }
-                drops.add(DropRule(material, min, max, chance, customName, randomEnchantment, customItem))
+                val enchants = when (val value = raw["enchants"]) {
+                    null -> emptyMap()
+                    is Map<*, *> -> readEnchants(value.entries.associate { it.key.toString() to it.value }, "mobs.$id.drops", enchantmentValidator)
+                    else -> throw IllegalArgumentException("mobs.$id.drops.enchants must be a map like { sharpness: 4 }")
+                }
+                if (enchants.isNotEmpty() && randomEnchantment) {
+                    throw IllegalArgumentException("mobs.$id.drops: use either enchants or random-enchantment, not both")
+                }
+                drops.add(DropRule(material, min, max, chance, customName, randomEnchantment, customItem, enchants))
             }
 
             rules.add(MobRule(id, type, nameContains, entityTag, drops.toList()))
@@ -258,38 +270,51 @@ object ConfigParser {
         val name = section.getString("name")
         val lore = section.getStringList("lore")
         val unbreakable = section.getBoolean("unbreakable", false)
-        val enchants = LinkedHashMap<NamespacedKey, Int>()
-        val enchantments = section.getConfigurationSection("enchants")
-        if (enchantments != null) {
-            for (enchantName in enchantments.getKeys(false)) {
-                val level = enchantments.getInt(enchantName, 0)
-                if (level < 1) {
-                    throw IllegalArgumentException("Enchant level must be at least 1 at $path.enchants.$enchantName")
-                }
-                val normalizedKey = enchantName.lowercase(Locale.ROOT)
-                val enchantKey = if (normalizedKey.contains(":")) {
-                    NamespacedKey.fromString(normalizedKey)
-                } else {
-                    try {
-                        NamespacedKey.minecraft(normalizedKey)
-                    } catch (_: IllegalArgumentException) {
-                        null
-                    }
-                } ?: throw IllegalArgumentException("Invalid enchantment key at $path.enchants.$enchantName")
-                if (!enchantmentValidator(enchantKey)) {
-                    throw IllegalArgumentException("Unknown enchantment at $path.enchants.$enchantName")
-                }
-                enchants[enchantKey] = level
-            }
-        }
+        val enchants = section.getConfigurationSection("enchants")
+            ?.let { enchantments -> enchantments.getKeys(false).associateWith { enchantments.get(it) } }
+            ?.let { readEnchants(it, path, enchantmentValidator) }
+            .orEmpty()
         return ItemDefinition(
             material = material,
             amount = amount,
             name = name,
             lore = lore.toList(),
             unbreakable = unbreakable,
-            enchants = enchants.toMap(),
+            enchants = enchants,
         )
+    }
+
+    /**
+     * Enchantment names (`sharpness`, `minecraft:sharpness`) mapped to levels, as used by recipe results and
+     * drops. Levels above the vanilla maximum are allowed; unknown enchantments and levels below 1 are errors.
+     */
+    private fun readEnchants(
+        raw: Map<String, Any?>,
+        path: String,
+        enchantmentValidator: (NamespacedKey) -> Boolean,
+    ): Map<NamespacedKey, Int> {
+        val enchants = LinkedHashMap<NamespacedKey, Int>()
+        for ((enchantName, value) in raw) {
+            val level = intValue(value, 0, "$path.enchants.$enchantName")
+            if (level < 1) {
+                throw IllegalArgumentException("Enchant level must be at least 1 at $path.enchants.$enchantName")
+            }
+            val normalizedKey = enchantName.lowercase(Locale.ROOT)
+            val enchantKey = if (normalizedKey.contains(":")) {
+                NamespacedKey.fromString(normalizedKey)
+            } else {
+                try {
+                    NamespacedKey.minecraft(normalizedKey)
+                } catch (_: IllegalArgumentException) {
+                    null
+                }
+            } ?: throw IllegalArgumentException("Invalid enchantment key at $path.enchants.$enchantName")
+            if (!enchantmentValidator(enchantKey)) {
+                throw IllegalArgumentException("Unknown enchantment at $path.enchants.$enchantName")
+            }
+            enchants[enchantKey] = level
+        }
+        return enchants.toMap()
     }
 
     private fun defaultEnchantmentExists(key: NamespacedKey): Boolean =
@@ -348,6 +373,7 @@ object ConfigParser {
                         name = drop.name,
                         randomEnchantment = drop.randomEnchantment,
                         customItem = drop.customItem,
+                        enchants = drop.enchants,
                     ),
                 )
             }

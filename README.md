@@ -277,6 +277,21 @@ Place a Custom Jukebox item, then right-click it while holding a mapped disc (or
 
 Each `mobs` entry has an `entity` (Bukkit entity type, or `ANY`), a required `entity-tag` scoreboard tag, optional `name-contains` (case-insensitive substring of the mob's custom name), and a list of `drops`. Every rule requires its unique tag, so renaming an ordinary mob cannot trigger custom drops. Add the same tag to each special mob with the summon command's `Tags` field. For example, a champion uses `entity: ANY`, `entity-tag: "forsaken.champion"`, and `name-contains: "Champion"`, while its summon NBT includes `Tags:["forsaken.champion"]`. Drops are added to vanilla drops. Each drop supports `material`, `min`, `max`, `chance` (0.0 through 1.0), and optional `name` (with `&` color codes). Numbers may be quoted (`chance: "0.05"`); non-numeric values are reported as config errors. Counts above an item's max stack size (for example 100 arrows) drop as several valid stacks.
 
+Drops can also carry fixed enchantments with `enchants`, in the same format recipe results use. Levels above the vanilla maximum are allowed. On an `ENCHANTED_BOOK` they're stored in the book, and on a custom `item` they're added to its own enchantments:
+
+```yaml
+mobs:
+  champion:
+    entity: ANY
+    entity-tag: "forsaken.champion"
+    drops:
+      - { material: DIAMOND_SWORD, min: 1, max: 1, chance: 0.12, name: "&6Champion's Blade",
+          enchants: { sharpness: 4, unbreaking: 3, looting: 2 } }
+      - { material: ENCHANTED_BOOK, chance: 0.05, enchants: { mending: 1 } }
+```
+
+Unknown enchantments and levels below 1 are reported on reload. `enchants` and `random-enchantment` (one random enchantment on a book) can't be combined on the same drop.
+
 The supplied archive's five loot tables have been converted into the default config. The assumed entity mappings are Skeleton/Archer and Zombie/Grunt; Champion, Dreadbound, and Ravager use `ANY` plus their custom-name substring because their base entity types were not specified. Change these matches to fit the arena's actual mobs. The archive did not specify those mappings.
 
 If a drop does not fire, use `/femitems debug` to toggle mob-death diagnostics, kill one affected mob, then check the server console for its actual entity type, custom name, and matching rule IDs. Run `/femitems debug` again to turn diagnostics off. Check that the summon command includes the rule's configured scoreboard tag. Reload config with `/femitems reload`.

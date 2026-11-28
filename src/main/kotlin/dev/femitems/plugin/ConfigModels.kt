@@ -13,6 +13,8 @@ data class DropRule(
     val randomEnchantment: Boolean = false,
     /** Custom item id (`namespace:key`) to drop instead of a plain [material] stack. */
     val customItem: String? = null,
+    /** Fixed enchantments (stored enchantments for enchanted books); levels above the vanilla max are allowed. */
+    val enchants: Map<NamespacedKey, Int> = emptyMap(),
 )
 
 data class MobRule(
@@ -87,4 +89,5 @@ data class RolledDrop(
     val name: String? = null,
     val randomEnchantment: Boolean = false,
     val customItem: String? = null,
+    val enchants: Map<NamespacedKey, Int> = emptyMap(),
 )
