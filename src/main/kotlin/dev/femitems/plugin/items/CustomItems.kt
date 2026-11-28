@@ -58,7 +58,17 @@ enum class AbilityType(val configName: String, val options: List<String>) {
     /** Shoot a blaze fireball; [ItemAbility.incendiary] also sets blocks on fire. */
     FIREBALL("fireball", listOf("incendiary")),
     /** Strike lightning at the block you look at, up to [ItemAbility.distance] away. */
-    LIGHTNING("lightning", listOf("distance", "damage"));
+    LIGHTNING("lightning", listOf("distance", "damage", "fire")),
+    /** Give a potion effect to every mob (and optionally player) within [ItemAbility.radius]. */
+    AURA("aura", listOf("effect", "level", "duration", "radius", "players")),
+    /** Freeze (powder-snow frost + Slowness) everything within [ItemAbility.radius]. */
+    FREEZE("freeze", listOf("level", "duration", "radius", "players")),
+    /** Damage everything within [ItemAbility.radius] and heal yourself for [ItemAbility.healPercent] of it. */
+    DRAIN("drain", listOf("damage", "heal-percent", "radius", "players")),
+    /** Knock everything within [ItemAbility.radius] away from you, optionally with damage. */
+    SHOCKWAVE("shockwave", listOf("power", "damage", "radius", "players")),
+    /** Shoot [ItemAbility.count] arrows in a spread. */
+    VOLLEY("volley", listOf("count"));
 
     companion object {
         fun fromConfig(name: String): AbilityType? = entries.firstOrNull { it.configName == name.trim().lowercase(Locale.ROOT) }
@@ -78,8 +88,20 @@ data class ItemAbility(
     val level: Int = 1,
     val durationSeconds: Double = 0.0,
     val incendiary: Boolean = false,
-    /** Lightning: true = real lightning (damage, fire), false = harmless visual strike. */
+    /** Lightning: true = real lightning (damage), false = harmless visual strike. */
     val damage: Boolean = true,
+    /** Lightning: may it set blocks on fire. */
+    val fire: Boolean = false,
+    /** Area abilities: how far around the user they reach. */
+    val radius: Double = 0.0,
+    /** Area abilities: also affect other players (only where PvP is on). */
+    val players: Boolean = false,
+    /** Drain / shockwave: damage dealt to each target. */
+    val damageAmount: Double = 0.0,
+    /** Drain: share of the damage dealt that heals the user, 0-100. */
+    val healPercent: Double = 0.0,
+    /** Volley: number of arrows. */
+    val count: Int = 0,
 ) {
     companion object {
         const val DEFAULT_COOLDOWN_MESSAGE = "&cWait {seconds} seconds"
@@ -123,7 +145,7 @@ data class CustomItemDefinition(
     val attributes: List<AttributeSpec>,
     /** Headline stats replacing the base item's own values (see [ItemStat]). */
     val stats: Map<ItemStat, Double> = emptyMap(),
-    /** Browser category (`/femitems browse`); null = automatic from the material (see [ItemCategories]). */
+    /** Browser category (`/femitems gui`); null = automatic from the material (see [ItemCategories]). */
     val category: String? = null,
     /** Right-click ability (see [ItemAbility]); null = none. */
     val ability: ItemAbility? = null,
@@ -320,22 +342,55 @@ class ContentPackLoader(
         val cooldown = ranged("cooldown", 10.0, 0.0..86400.0)
         val message = section.getString("cooldown-message") ?: ItemAbility.DEFAULT_COOLDOWN_MESSAGE
         val base = ItemAbility(type, cooldown, message)
+        fun effectKey(example: String): NamespacedKey {
+            val name = section.getString("effect") ?: throw ContentPackException(file, "$where.effect is required (e.g. $example)")
+            val key = minecraftKey(name) ?: throw ContentPackException(file, "$where.effect: invalid key '$name'")
+            if (!effectExists(key)) throw ContentPackException(file, "$where.effect: unknown effect '$name'")
+            return key
+        }
+        fun radius() = ranged("radius", 5.0, 1.0..16.0)
+        fun players() = section.getBoolean("players", false)
         return when (type) {
             AbilityType.TELEPORT -> base.copy(distance = ranged("distance", 5.0, 1.0..32.0))
             AbilityType.LEAP -> base.copy(power = ranged("power", 1.5, 0.1..4.0))
             AbilityType.HEAL -> base.copy(amount = ranged("amount", 6.0, 0.5..1024.0))
-            AbilityType.EFFECT -> {
-                val name = section.getString("effect") ?: throw ContentPackException(file, "$where.effect is required (e.g. speed, strength, regeneration)")
-                val key = minecraftKey(name) ?: throw ContentPackException(file, "$where.effect: invalid key '$name'")
-                if (!effectExists(key)) throw ContentPackException(file, "$where.effect: unknown effect '$name'")
-                base.copy(
-                    effect = key,
-                    level = ranged("level", 1.0, 1.0..255.0).toInt(),
-                    durationSeconds = ranged("duration", 10.0, 0.05..3600.0),
-                )
-            }
+            AbilityType.EFFECT -> base.copy(
+                effect = effectKey("speed, strength, regeneration"),
+                level = ranged("level", 1.0, 1.0..255.0).toInt(),
+                durationSeconds = ranged("duration", 10.0, 0.05..3600.0),
+            )
             AbilityType.FIREBALL -> base.copy(incendiary = section.getBoolean("incendiary", false))
-            AbilityType.LIGHTNING -> base.copy(distance = ranged("distance", 20.0, 1.0..32.0), damage = section.getBoolean("damage", true))
+            AbilityType.LIGHTNING -> base.copy(
+                distance = ranged("distance", 20.0, 1.0..32.0),
+                damage = section.getBoolean("damage", true),
+                fire = section.getBoolean("fire", false),
+            )
+            AbilityType.AURA -> base.copy(
+                effect = effectKey("poison, slowness, weakness, wither, glowing"),
+                level = ranged("level", 1.0, 1.0..255.0).toInt(),
+                durationSeconds = ranged("duration", 5.0, 0.05..3600.0),
+                radius = radius(),
+                players = players(),
+            )
+            AbilityType.FREEZE -> base.copy(
+                level = ranged("level", 2.0, 1.0..10.0).toInt(),
+                durationSeconds = ranged("duration", 5.0, 0.5..60.0),
+                radius = radius(),
+                players = players(),
+            )
+            AbilityType.DRAIN -> base.copy(
+                damageAmount = ranged("damage", 4.0, 0.5..100.0),
+                healPercent = ranged("heal-percent", 50.0, 0.0..100.0),
+                radius = radius(),
+                players = players(),
+            )
+            AbilityType.SHOCKWAVE -> base.copy(
+                power = ranged("power", 1.2, 0.1..4.0),
+                damageAmount = ranged("damage", 0.0, 0.0..100.0),
+                radius = radius(),
+                players = players(),
+            )
+            AbilityType.VOLLEY -> base.copy(count = ranged("count", 5.0, 1.0..15.0).toInt())
         }
     }
 

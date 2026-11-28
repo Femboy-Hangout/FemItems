@@ -167,6 +167,10 @@ class FakePlayerClient(
     private val ownAttributes = ConcurrentHashMap<String, Double>()
     private val spawnedEntities = BoundedEventBuffer<SpawnedEntity>(MAX_CAPTURED_EVENTS)
     private val entityHealth = BoundedEventBuffer<EntityHealth>(MAX_CAPTURED_EVENTS)
+    /** Other entities' velocity changes (knockback), as entity id + x/y/z. */
+    private val entityMotion = BoundedEventBuffer<Pair<Int, List<Double>>>(MAX_CAPTURED_EVENTS)
+    /** Other entities' powder-snow frozen ticks (metadata index 7), as entity id to ticks. */
+    private val entityFrozen = BoundedEventBuffer<Pair<Int, Int>>(MAX_CAPTURED_EVENTS)
     /** Absolute positions the server moved this player to (teleports), as x/y/z. */
     private val teleports = BoundedEventBuffer<List<Double>>(MAX_CAPTURED_EVENTS)
     /** Velocities the server gave this player (x, y, z), e.g. from a leap. */
@@ -237,6 +241,8 @@ class FakePlayerClient(
 
                     is ClientboundSetEntityMotionPacket -> if (packet.entityId == ownEntityId.get()) {
                         ownMotion.add(listOf(packet.movement.x, packet.movement.y, packet.movement.z))
+                    } else {
+                        entityMotion.add(packet.entityId to listOf(packet.movement.x, packet.movement.y, packet.movement.z))
                     }
 
                     is ClientboundSetHealthPacket -> ownHealth.add(packet.health)
@@ -249,6 +255,7 @@ class FakePlayerClient(
                     is ClientboundSetEntityDataPacket -> for (data in packet.metadata) {
                         val health = data.value
                         if (data.id == 9 && health is Float) entityHealth.add(EntityHealth(packet.entityId, health))
+                        if (data.id == 7 && health is Int) entityFrozen.add(packet.entityId to health)
                     }
 
                     is ClientboundSystemChatPacket -> {
@@ -488,6 +495,27 @@ class FakePlayerClient(
     /** Waits for an entity of [type] (MCProtocolLib name, e.g. `PIG`) to appear for this client. */
     fun awaitSpawnedEntity(type: String, sinceIndex: Int = 0, timeout: Duration = Duration.ofSeconds(15)): SpawnedEntity =
         awaitEvent(spawnedEntities, "spawned $type", sinceIndex, timeout) { it.type == type }
+
+    /** Entities that appeared since [index] (e.g. to count the arrows of a volley). */
+    fun spawnedEntitiesSince(index: Int): List<SpawnedEntity> = spawnedEntities.snapshotSince(index)
+
+    /** The last health the server sent this player (null before the first update). */
+    fun lastHealth(): Float? = ownHealth.snapshot().lastOrNull()
+
+    /** Every health value the server sent this player since [index]. */
+    fun healthSince(index: Int): List<Float> = ownHealth.snapshotSince(index)
+
+    fun entityMotionCount(): Int = entityMotion.count()
+
+    /** Waits for entity [entityId] to be given a velocity matching [predicate] (x, y, z). */
+    fun awaitEntityMotion(entityId: Int, sinceIndex: Int = 0, timeout: Duration = Duration.ofSeconds(15), predicate: (List<Double>) -> Boolean): List<Double> =
+        awaitEvent(entityMotion, "velocity of entity $entityId", sinceIndex, timeout) { it.first == entityId && predicate(it.second) }.second
+
+    fun entityFrozenCount(): Int = entityFrozen.count()
+
+    /** Waits for entity [entityId] to have at least [ticks] powder-snow frozen ticks. */
+    fun awaitEntityFrozen(entityId: Int, ticks: Int, sinceIndex: Int = 0, timeout: Duration = Duration.ofSeconds(15)): Int =
+        awaitEvent(entityFrozen, "entity $entityId frozen for $ticks ticks", sinceIndex, timeout) { it.first == entityId && it.second >= ticks }.second
 
     fun entityHealthCount(): Int = entityHealth.count()
 

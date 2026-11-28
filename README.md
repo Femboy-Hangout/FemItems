@@ -30,7 +30,7 @@ All commands require `femitems.reload` (operators by default). `/femi` is an ali
 | `/femitems reload` | Reloads `config.yml`. On success it reports the loaded counts; on failure it reports the line number, and hovering the message shows the exact error. A failed reload leaves the previous config fully active. |
 | `/femitems debug` | Toggles mob-death diagnostics in the console. |
 | `/femitems items` | Lists all custom item IDs. |
-| `/femitems browse` | Opens a GUI of all custom items by category. With `femitems.give`, click an item to take one (shift-click for a stack). |
+| `/femitems gui` | Opens a GUI of all custom items by category. With `femitems.give`, click an item to take one (shift-click for a stack). |
 | `/femitems stats` | Shows the sizes of FemItems' internal per-player stores (playbacks, bossbars, volumes, shuffle, listeners) plus custom item and recipe counts; useful to confirm nothing grows over time. |
 | `/femitems pack` | Shows the custom item resource pack status and re-checks the uploaded copy (after uploading a new version). |
 | `/femitems give <player> <namespace:item> [amount]` | Gives a custom item. Requires `femitems.give` (operators by default). |
@@ -127,7 +127,7 @@ items:
 
 It also chooses the slot: `mainhand`, `offhand`, `hand`, `head`, `chest`, `legs`, `feet`, `armor`, `body` or `any`. Changing stats or attributes doesn't touch the resource pack, so there's nothing to re-upload. Run `/femitems reload`. Items people already have keep their old stats; newly given, crafted or dropped ones get the new values.
 
-Other item options: `unbreakable: true`, `max-stack-size: 1-99` (not with durability), `slot: head|chest|legs|feet` for wearables that are not armour, and `category: <name>` to group the item in `/femitems browse`. Without `category`, items are sorted into Weapons, Tools, Armor or Other by their material. A misspelt option (for example `damage:` instead of `attack-damage:`) is reported on reload with a suggestion, rather than silently ignored.
+Other item options: `unbreakable: true`, `max-stack-size: 1-99` (not with durability), `slot: head|chest|legs|feet` for wearables that are not armour, and `category: <name>` to group the item in `/femitems gui`. Without `category`, items are sorted into Weapons, Tools, Armor or Other by their material. A misspelt option (for example `damage:` instead of `attack-damage:`) is reported on reload with a suggestion, rather than silently ignored.
 
 **Abilities.** `ability:` gives an item a right-click power with a per-player cooldown:
 
@@ -149,7 +149,14 @@ Other item options: `unbreakable: true`, `max-stack-size: 1-99` (not with durabi
 | `heal` | Restore health instantly. | `amount` (6; 2 = one heart) |
 | `effect` | Give yourself a potion effect. | `effect` (required, e.g. `speed`), `level` (1), `duration` (10 s) |
 | `fireball` | Shoot a blaze fireball. | `incendiary` (false; true also sets blocks on fire) |
-| `lightning` | Strike the block you look at. | `distance` (20, max 32), `damage` (true; false = visual only) |
+| `lightning` | Strike the block you look at. Never hurts or burns its caster, and never hurts players where PvP is off. | `distance` (20, max 32), `damage` (true; false = visual only), `fire` (false) |
+| `aura` | Give nearby mobs a potion effect. | `effect` (required, e.g. `poison`), `level` (1), `duration` (5 s), `radius` (5) |
+| `freeze` | Freeze nearby mobs like powder snow, plus Slowness. | `level` (2), `duration` (5 s), `radius` (5) |
+| `drain` | Damage nearby mobs and heal yourself for a share of it. | `damage` (4), `heal-percent` (50), `radius` (5) |
+| `shockwave` | Knock nearby mobs away. | `power` (1.2), `damage` (0), `radius` (5) |
+| `volley` | Shoot a fan of arrows that can't be picked up. | `count` (5, max 15) |
+
+Area abilities (`aura`, `freeze`, `drain`, `shockwave`) never affect the user or their own pets. They only affect other players with `players: true` and only where PvP is on. With nothing in range they report it and start no cooldown.
 
 Abilities trigger on right-click in the air or on an ordinary block. Doors, chests and other usable blocks keep working, and sneaking uses the ability on them instead. When an ability can't work (no room, full health, nothing in range), the player is told why and the cooldown doesn't start. Cooldowns are per player and per item, are cleared when a player leaves, and their count shows in `/femitems stats`. On Folia, an ability only touches the blocks of the region it runs in.
 

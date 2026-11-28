@@ -7,7 +7,7 @@ authors: [FemItems]
 description: Custom items with resource-pack textures, reloadable mob drops and recipes, and NBS jukebox music for Paper and Folia.
 permissions:
   femitems.reload:
-    description: Allows /femitems (info), /femitems reload, /femitems debug, /femitems items, and /femitems browse (view only without femitems.give).
+    description: Allows /femitems (info), /femitems reload, /femitems debug, /femitems items, and /femitems gui (view only without femitems.give).
     default: op
   femitems.give:
     description: Allows /femitems give <player> <item> [amount] for custom items.

@@ -80,7 +80,7 @@ object ItemCategories {
 }
 
 /**
- * `/femitems browse`: a chest GUI listing every custom item by category. Players with `femitems.give`
+^ * `/femitems gui`: a chest GUI listing every custom item by category. Players with `femitems.give`
  * take items by clicking (left: one, shift: a stack); everyone else can only look.
  *
  * Threading: opened and clicked on the viewing player's own thread; item data is read from the immutable

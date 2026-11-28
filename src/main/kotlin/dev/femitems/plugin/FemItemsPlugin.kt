@@ -71,7 +71,7 @@ class FemItemsPlugin : JavaPlugin(), Listener {
     /** ItemsAdder-style custom items with their own textures, from `contents/<namespace>/`. */
     private val customItems = CustomItemService(this)
 
-    /** `/femitems browse`: the custom item GUI, by category. */
+    /** `/femitems gui`: the custom item GUI, by category. */
     private val itemBrowser = ItemBrowser(this, customItems)
 
     /** Right-click item abilities (`ability:` in items.yml) and their per-player cooldowns. */
@@ -185,7 +185,7 @@ class FemItemsPlugin : JavaPlugin(), Listener {
                 },
             )
             .then(
-                Commands.literal("browse").executes { context ->
+                Commands.literal("gui").executes { context ->
                     val player = context.source.executor as? Player ?: context.source.sender as? Player
                     if (player == null) {
                         context.source.sender.sendMessage(Messages.playersOnly())

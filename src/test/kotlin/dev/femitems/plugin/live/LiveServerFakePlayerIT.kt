@@ -1056,11 +1056,11 @@ class LiveServerFakePlayerIT {
         op.sendCommand("kill @e[type=minecraft:pig,distance=..10]")
         op.selectHotbarSlot(0)
 
-        // C9. /femitems browse: categories (automatic Weapons/Armor, then the custom "Gems" whose two spellings
+        // C9. /femitems gui: categories (automatic Weapons/Armor, then the custom "Gems" whose two spellings
         // merge), open one, take an item by clicking, and go back.
         var browseScreens = op.openedScreenCount()
         val slotsBeforeBrowse = op.slotUpdateCount()
-        op.sendCommand("femitems browse")
+        op.sendCommand("femitems gui")
         val home = op.awaitScreenTitleContaining("Custom items", sinceIndex = browseScreens)
         assertEquals("Custom items", home.title)
         fun browserSlot(screen: OpenedScreen, slot: Int, pattern: Regex, since: Int) =
@@ -1163,6 +1163,73 @@ class LiveServerFakePlayerIT {
         val chatBeforeSky = op.chatCount()
         op.useHeldItem(pitch = -60f)
         op.awaitChatContaining("Look at a block within range.", sinceIndex = chatBeforeSky)
+
+        // C12. Area abilities on a 100 HP pig 2.5 blocks away, plus volley and real lightning.
+        fun summonPig(): Int {
+            op.sendCommand("kill @e[type=minecraft:pig,distance=..20]")
+            val mark = op.spawnedEntityCount()
+            op.sendCommand("""summon minecraft:pig 0.5 -60 3.0 {NoAI:1b,Silent:1b,Health:100f,attributes:[{id:"minecraft:max_health",base:100}]}""")
+            return op.awaitSpawnedEntity("PIG", sinceIndex = mark).id.also { Thread.sleep(500) }
+        }
+        op.sendCommand("tp @s 0.5 -60 0.5 0 0")
+        // With nothing around, an area ability says so and starts no cooldown.
+        op.sendCommand("kill @e[type=minecraft:pig,distance=..20]")
+        swordAbility("{ type: aura, effect: poison, level: 2, duration: 5, radius: 5, cooldown: 60 }")
+        var chatMark = op.chatCount()
+        op.useHeldItem()
+        op.awaitChatContaining("Nothing in range.", sinceIndex = chatMark)
+        // Aura (poison): the pig loses health over time; the user is not poisoned.
+        var target = summonPig()
+        // No cooldown from here on. A cooldown started by the failed use above would still block this one.
+        swordAbility("{ type: aura, effect: poison, level: 2, duration: 5, radius: 5, cooldown: 0 }")
+        var healthMark = op.entityHealthCount()
+        val ownEffectsBefore = op.effectCount()
+        op.useHeldItem()
+        op.awaitEntityHealth(target, sinceIndex = healthMark) { it < 100f }
+        assertTrue(op.effectCount() == ownEffectsBefore, "[$platform] The aura affected its own user")
+        // Freeze: the target is fully frozen (140+ frozen ticks).
+        swordAbility("{ type: freeze, duration: 5, radius: 5, cooldown: 0 }")
+        val frozenMark = op.entityFrozenCount()
+        op.useHeldItem()
+        op.awaitEntityFrozen(target, 140, sinceIndex = frozenMark)
+        // Drain: a fresh target is hit for 6 and the hurt user heals 50% of it (+3) in one go.
+        target = summonPig()
+        server.sendConsoleCommand("damage FakeOp 8 minecraft:out_of_world")
+        Thread.sleep(700)
+        val hurtHealth = op.lastHealth()!!
+        swordAbility("{ type: drain, damage: 6, heal-percent: 50, radius: 5, cooldown: 0 }")
+        healthMark = op.entityHealthCount()
+        val ownHealthMark = op.healthCount()
+        op.useHeldItem()
+        assertEquals(94f, op.awaitEntityHealth(target, sinceIndex = healthMark) { it < 100f }.health, "[$platform] Drain did not deal 6 damage")
+        op.awaitHealth("+3 health from drain", sinceIndex = ownHealthMark, timeout = Duration.ofMillis(1200)) { it >= hurtHealth + 2.9f }
+        // Shockwave: the target (south of the user) is pushed further south.
+        swordAbility("{ type: shockwave, power: 1.2, radius: 5, cooldown: 0 }")
+        val motionMark = op.entityMotionCount()
+        op.useHeldItem()
+        val push = op.awaitEntityMotion(target, sinceIndex = motionMark) { (_, _, z) -> z > 0.8 }
+        assertTrue(push[1] > 0.3, "[$platform] Shockwave did not lift the target: $push")
+        // Volley: 5 arrows.
+        swordAbility("{ type: volley, count: 5, cooldown: 0 }")
+        val arrowMark = op.spawnedEntityCount()
+        op.useHeldItem()
+        val deadline = System.currentTimeMillis() + 10_000
+        while (op.spawnedEntitiesSince(arrowMark).count { it.type == "ARROW" } < 5 && System.currentTimeMillis() < deadline) Thread.sleep(50)
+        assertEquals(5, op.spawnedEntitiesSince(arrowMark).count { it.type == "ARROW" }, "[$platform] Volley did not shoot 5 arrows")
+        // Real lightning about a block in front of the user: it strikes, but never hurts or burns its caster.
+        op.sendCommand("kill @e[type=minecraft:pig,distance=..20]")
+        swordAbility("{ type: lightning, distance: 20, cooldown: 0 }")
+        Thread.sleep(500)
+        val beforeStrike = op.lastHealth()!!
+        val strikeHealthMark = op.healthCount()
+        val boltMark = op.spawnedEntityCount()
+        op.useHeldItem(pitch = 60f)
+        op.awaitSpawnedEntity("LIGHTNING_BOLT", sinceIndex = boltMark)
+        Thread.sleep(2000)
+        assertTrue(
+            op.healthSince(strikeHealthMark).none { it < beforeStrike - 0.01f },
+            "[$platform] The lightning ability hurt its own caster: ${op.healthSince(strikeHealthMark)}",
+        )
         op.selectHotbarSlot(0)
     }
 

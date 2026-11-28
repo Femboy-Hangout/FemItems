@@ -47,7 +47,7 @@ class MessagesTest {
                 "[FemItems] v1.3.0 on Folia",
                 "  ✦ 5 mob rules · 8 recipes · debug off",
                 "  ▸ /femitems reload — reload config.yml",
-                "  ▸ /femitems browse — browse custom items by category",
+                "  ▸ /femitems gui — browse custom items by category",
                 "  ▸ /femitems debug — toggle mob-death diagnostics",
             ),
             lines,

@@ -666,7 +666,7 @@ class CustomItemsTest {
         assertContains(error("{ type: effect, effect: speed, level: 0 }"), "ability.level must be 1 to 255")
         assertContains(error("{ type: leap, power: 9 }"), "ability.power must be 0.1 to 4")
         assertContains(error("{ type: heal, distance: 3 }"), "ability.distance: not an option for heal (options: type, cooldown, cooldown-message, amount)")
-        assertContains(error("{ type: nuke }"), "(teleport, leap, heal, effect, fireball, lightning)")
+        assertContains(error("{ type: nuke }"), "(teleport, leap, heal, effect, fireball, lightning, aura, freeze, drain, shockwave, volley)")
     }
 
     @Test
@@ -699,5 +699,54 @@ class CustomItemsTest {
         assertEquals("&cWait 15 seconds", Abilities.cooldownText(ItemAbility.DEFAULT_COOLDOWN_MESSAGE, 15))
         assertEquals("&cWait 1 second", Abilities.cooldownText(ItemAbility.DEFAULT_COOLDOWN_MESSAGE, 1))
         assertEquals("&eHold on, 3s", Abilities.cooldownText("&eHold on, {seconds}s", 3))
+    }
+
+    @Test
+    fun `area abilities and volley read their options with safe defaults`(@TempDir root: Path) {
+        val contents = root.resolve("ok")
+        pack(
+            contents, "ns",
+            """
+            items:
+              dagger: { material: PAPER, texture: t, ability: { type: aura, effect: poison, level: 2, duration: 6, radius: 4, cooldown: 15 } }
+              axe: { material: PAPER, texture: t, ability: { type: freeze, cooldown: 15 } }
+              scythe: { material: PAPER, texture: t, ability: { type: drain, damage: 6, heal-percent: 50, players: true } }
+              hammer: { material: PAPER, texture: t, ability: { type: shockwave } }
+              bow: { material: PAPER, texture: t, ability: { type: volley, count: 7 } }
+              storm: { material: PAPER, texture: t, ability: { type: lightning, fire: true } }
+            """,
+            "t",
+        )
+        val a = loader(contents).load().single().items.associate { it.key to it.ability!! }
+        assertEquals(ItemAbility(AbilityType.AURA, 15.0, effect = NamespacedKey.minecraft("poison"), level = 2, durationSeconds = 6.0, radius = 4.0), a["dagger"])
+        assertEquals(ItemAbility(AbilityType.FREEZE, 15.0, level = 2, durationSeconds = 5.0, radius = 5.0), a["axe"])
+        assertEquals(ItemAbility(AbilityType.DRAIN, 10.0, damageAmount = 6.0, healPercent = 50.0, radius = 5.0, players = true), a["scythe"])
+        assertEquals(ItemAbility(AbilityType.SHOCKWAVE, 10.0, power = 1.2, damageAmount = 0.0, radius = 5.0), a["hammer"])
+        assertEquals(ItemAbility(AbilityType.VOLLEY, 10.0, count = 7), a["bow"])
+        assertEquals(ItemAbility(AbilityType.LIGHTNING, 10.0, distance = 20.0, damage = true, fire = true), a["storm"])
+        assertTrue(a.values.filter { it.type != AbilityType.DRAIN }.none { it.players }, "other players are only affected when asked for")
+
+        fun error(ability: String): String {
+            val folder = root.resolve("e-${System.nanoTime()}")
+            pack(folder, "ns", "items:\n  a:\n    material: PAPER\n    texture: t\n    ability: $ability\n", "t")
+            return assertFailsWith<ContentPackException> { loader(folder).load() }.message!!
+        }
+        assertContains(error("{ type: aura }"), "ability.effect is required (e.g. poison")
+        assertContains(error("{ type: freeze, radius: 40 }"), "ability.radius must be 1 to 16")
+        assertContains(error("{ type: drain, heal-percent: 150 }"), "ability.heal-percent must be 0 to 100")
+        assertContains(error("{ type: volley, count: 50 }"), "ability.count must be 1 to 15")
+        assertContains(error("{ type: volley, radius: 3 }"), "ability.radius: not an option for volley")
+    }
+
+    @Test
+    fun `shockwave pushes away from the user and volley fans out evenly`() {
+        val push = Abilities.knockback(org.bukkit.util.Vector(0, 64, 0), org.bukkit.util.Vector(3, 64, 4), 1.0)
+        assertEquals(0.6, push.x, 1e-9)
+        assertEquals(0.8, push.z, 1e-9)
+        assertEquals(0.5, push.y, 1e-9)
+        val same = Abilities.knockback(org.bukkit.util.Vector(1, 64, 1), org.bukkit.util.Vector(1, 64, 1), 1.0)
+        assertEquals(1.0, same.length().let { kotlin.math.hypot(same.x, same.z) }, 1e-9, "a target on the same spot is still pushed")
+        assertEquals(listOf(0.0), Abilities.spread(1, 30.0))
+        assertEquals(listOf(-15.0, -7.5, 0.0, 7.5, 15.0), Abilities.spread(5, 30.0))
     }
 }

@@ -124,7 +124,7 @@ object Messages {
             .append(header)
             .append(Component.newline()).append(stats)
             .append(Component.newline()).append(commandLine("/femitems reload", "reload config.yml"))
-            .append(Component.newline()).append(commandLine("/femitems browse", "browse custom items by category"))
+            .append(Component.newline()).append(commandLine("/femitems gui", "browse custom items by category"))
             .append(Component.newline()).append(commandLine("/femitems debug", "toggle mob-death diagnostics"))
             .build()
     }
