@@ -44,6 +44,7 @@ class ConfigParserTest {
         NamespacedKey.minecraft("unbreaking"),
         NamespacedKey.minecraft("efficiency"),
         NamespacedKey.minecraft("feather_falling"),
+        NamespacedKey.minecraft("looting"),
     )
 
     private val testEnchantmentValidator: (NamespacedKey) -> Boolean = { it in knownEnchants }
@@ -59,8 +60,10 @@ class ConfigParserTest {
 
         val parsed = ConfigParser.parse(yaml, testMaxStackSize, testEnchantmentValidator)
 
-        assertEquals(5, parsed.mobRules.size)
+        assertEquals(16, parsed.mobRules.size)
         assertEquals(8, parsed.recipes.size)
+        // Boss weapon drops need the custom: content pack, so a fresh install must not reference it.
+        assertTrue(parsed.mobRules.flatMap { it.drops }.none { it.customItem != null }, "default config references custom items")
         assertEquals(
             listOf(
                 "soulpiercer_bow",
@@ -78,7 +81,7 @@ class ConfigParserTest {
         val archer = parsed.mobRules.first { it.id == "archer" }
         assertEquals(EntityType.SKELETON, archer.type)
         assertEquals("Archer", archer.nameContains)
-        assertEquals(4, archer.drops.size)
+        assertEquals(8, archer.drops.size)
 
         val champion = parsed.mobRules.first { it.id == "champion" }
         assertNull(champion.type)

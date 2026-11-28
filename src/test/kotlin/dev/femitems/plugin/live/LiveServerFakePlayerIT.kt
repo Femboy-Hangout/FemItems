@@ -84,8 +84,8 @@ class LiveServerFakePlayerIT {
                 "[$platform] Expected startup banner for $pluginVersion on $expectedPlatformLabel",
             )
             assertTrue(
-                startupLog.contains("Loaded 5 mob rules and 8 recipes."),
-                "[$platform] Expected default 5 mob rules and 8 recipes on startup",
+                startupLog.contains("Loaded 16 mob rules and 8 recipes."),
+                "[$platform] Expected default 16 mob rules and 8 recipes on startup",
             )
             assertTrue(
                 startupLog.contains("Jukebox ready: loaded 4 song(s)."),
@@ -130,7 +130,7 @@ class LiveServerFakePlayerIT {
                         "[FemItems] v$pluginVersion on $expectedPlatformLabel",
                         sinceIndex = opChatBeforeInfo,
                     )
-                    opPlayer.awaitChatContaining("5 mob rules · 8 recipes · debug off", sinceIndex = opChatBeforeInfo)
+                    opPlayer.awaitChatContaining("16 mob rules · 8 recipes · debug off", sinceIndex = opChatBeforeInfo)
 
                     // 3. Verify non-OP fake player cannot run /femitems reload
                     val guestChatMark = guestPlayer.chatCount()

@@ -302,7 +302,7 @@ mobs:
 
 Unknown enchantments and levels below 1 are reported on reload. `enchants` and `random-enchantment` (one random enchantment on a book) can't be combined on the same drop.
 
-The supplied archive's five loot tables have been converted into the default config. The assumed entity mappings are Skeleton/Archer and Zombie/Grunt; Champion, Dreadbound, and Ravager use `ANY` plus their custom-name substring because their base entity types were not specified. Change these matches to fit the arena's actual mobs. The archive did not specify those mappings.
+The default config has 16 mob rules: the five loot tables from the supplied archive, plus the FemMobs bosses (Molten Warden, Cosmic Wraith, Hollow Reaper, Frost Jarl, Storm Ronin, Venom Stalker, Champion) and their minions. The bosses' custom weapon drops are commented out there, because they need the `custom:` content pack: with it installed, remove the `# ` in front of each `- { item: custom:...` line. The Platinum Set recipes are included but commented out the same way. The supplied archive's five loot tables are the first five. The assumed entity mappings are Skeleton/Archer and Zombie/Grunt; Champion, Dreadbound, and Ravager use `ANY` plus their custom-name substring because their base entity types were not specified. Change these matches to fit the arena's actual mobs. The archive did not specify those mappings.
 
 If a drop does not fire, use `/femitems debug` to toggle mob-death diagnostics, kill one affected mob, then check the server console for its actual entity type, custom name, and matching rule IDs. Run `/femitems debug` again to turn diagnostics off. Check that the summon command includes the rule's configured scoreboard tag. Reload config with `/femitems reload`.
 

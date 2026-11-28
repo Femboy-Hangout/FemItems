@@ -22,7 +22,7 @@ For mandatory coding standards, Folia rules, version bumping, and testing workfl
   - Automated live Paper 26.3 & Folia 26.3 fake-player functional tests (`src/test/kotlin/dev/femitems/plugin/live/LiveServerFakePlayerIT.kt` using test-scoped MCProtocolLib `26.3-3`), run via `./mvnw -B verify -P live-test` (or `.\mvnw.cmd -B verify -P live-test`).
   - Interactive local dev server launchers (`scripts/run-server.sh` & `scripts/run-server.ps1`).
   - GitHub Actions CI/CD (`.github/workflows/build.yml`) builds and uploads the shaded JAR artifact on every push, runs unit + live Paper/Folia fake-player tests, and publishes a GitHub Release whenever a new version is pushed to `main`.
-- **Default config:** `src/main/resources/config.yml` maps the five loot tables from `forsaken_loot.zip` (`archer`, `grunt`, `champion`, `dreadbound`, `ravager`) and includes 8 custom crafting recipes (`soulpiercer_bow`, `emberblade`, `warlords_axe`, `aegis_shield`, `prospectors_pick`, `cloudstep_boots`, `wayfarers_saddle`, `heartwood_bow`).
+- **Default config (2.11.1):** 16 mob rules (the five loot tables plus the FemMobs bosses/minions; the six `custom:` boss weapon drops are commented out because a missing custom item fails all of config.yml on a fresh install), the 8 recipes, and the Platinum recipes commented out. Originally it mapped the five loot tables from `forsaken_loot.zip` (`archer`, `grunt`, `champion`, `dreadbound`, `ravager`) and includes 8 custom crafting recipes (`soulpiercer_bow`, `emberblade`, `warlords_axe`, `aegis_shield`, `prospectors_pick`, `cloudstep_boots`, `wayfarers_saddle`, `heartwood_bow`).
 
 ## Source archive findings
 
