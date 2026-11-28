@@ -18,7 +18,9 @@ Build with the bundled Maven Wrapper and Java 25:
 
 Copy the shaded JAR `target/femitems-<version>.jar` into the `plugins` directory of a **Paper 26.3** or **Folia 26.3** server (running Java 25) and start it. On first startup, edit `plugins/FemItems/config.yml`, then run `/femitems reload` (or `/femi reload`). The command requires `femitems.reload` (operators by default).
 
-**Missing settings are reported.** On startup and on every `/femitems reload` / `/femjukebox reload`, any setting the jar's copy of `config.yml` or `jukebox/config.yml` has and your file doesn't (an update added it, or a line was deleted) is named in the console, e.g. `[config.yml] 'resource-pack.required' is missing - the default is: false`, followed by a count line. Your file is never rewritten and the default applies. Your own `mobs:` and `recipes:` are never reported, so a default mob or recipe you deleted stays deleted.
+**Every chat message can be changed** in `plugins/FemItems/messages.yml` (saved on first start), in [MiniMessage](https://docs.advntr.dev/minimessage/format.html) format: the `[FemItems]` and `[FemJukebox]` prefixes (set either to `""` to drop it), command replies, reload and error messages, the resource pack check, the `/femitems` info panel, and the `/femjukebox` help. Placeholders such as `<amount>`, `<target>` and `<title>` are listed above each message. Run `/femitems reload` or `/femjukebox reload` after editing. A message you delete, or one MiniMessage can't read, uses the default text. Item ability and cooldown texts stay per item in `items.yml`.
+
+**Missing settings are reported.** On startup and on every `/femitems reload` / `/femjukebox reload`, any setting the jar's copy of `config.yml`, `messages.yml` or `jukebox/config.yml` has and your file doesn't (an update added it, or a line was deleted) is named in the console, e.g. `[config.yml] 'resource-pack.required' is missing - the default is: false`, followed by a count line. Your file is never rewritten and the default applies. Your own `mobs:` and `recipes:` are never reported, so a default mob or recipe you deleted stays deleted.
 
 ## Commands
 
@@ -27,7 +29,7 @@ All commands require `femitems.reload` (operators by default). `/femi` is an ali
 | Command | What it does |
 | :--- | :--- |
 | `/femitems` | Shows an info panel: plugin version, platform (Paper/Folia), loaded mob rules & recipes, debug state, and clickable command shortcuts. |
-| `/femitems reload` | Reloads `config.yml`. On success it reports the loaded counts; on failure it reports the line number, and hovering the message shows the exact error. A failed reload leaves the previous config fully active. |
+| `/femitems reload` | Reloads `config.yml` and `messages.yml`. On success it reports the loaded counts; on failure it reports the line number, and hovering the message shows the exact error. A failed reload leaves the previous config fully active. |
 | `/femitems debug` | Toggles mob-death diagnostics in the console. |
 | `/femitems items` | Lists all custom item IDs. |
 | `/femitems gui` | Opens a GUI of all custom items by category. With `femitems.give`, click an item to take one (shift-click for a stack). |
@@ -125,9 +127,17 @@ items:
 - `multiply_base`: +10% of the base value for 0.1
 - `multiply_total`
 
-It also chooses the slot: `mainhand`, `offhand`, `hand`, `head`, `chest`, `legs`, `feet`, `armor`, `body` or `any`. Changing stats or attributes doesn't touch the resource pack, so there's nothing to re-upload. Run `/femitems reload`. Items people already have keep their old stats; newly given, crafted or dropped ones get the new values.
+It also chooses the slot: `mainhand`, `offhand`, `hand`, `head`, `chest`, `legs`, `feet`, `armor`, `body` or `any`. Changing stats or attributes doesn't touch the resource pack, so there's nothing to re-upload. Run `/femitems reload`; items people already have update too (see below).
 
 Other item options: `unbreakable: true`, `max-stack-size: 1-99` (not with durability), `slot: head|chest|legs|feet` for wearables that are not armour, and `category: <name>` to group the item in `/femitems gui`. Without `category`, items are sorted into Weapons, Tools, Armor or Other by their material. A misspelt option (for example `damage:` instead of `attack-damage:`) is reported on reload with a suggestion, rather than silently ignored.
+
+**Names and lore** take `&` colour codes or [MiniMessage](https://docs.advntr.dev/minimessage/format.html) (`'<gradient:#c77dff:#48cae4><bold>Cosmic Sword</bold></gradient>'`); a line with a MiniMessage tag is read as MiniMessage.
+
+**Items people already have stay up to date.** After you change an item in `items.yml`, copies players already own get the new stats, name, lore and ability on join, after `/femitems reload`, when held, picked up, or when they close a chest. Each copy keeps its own enchantments, wear, anvil cost, armour trim, anvil rename, and other plugins' data.
+
+**Soulbound and announcements.** `soulbound: true` keeps the item on death instead of dropping it. `announce: true` tells the whole server when a mob drops it (text: `rare-drop` in `messages.yml`; hover the item name to see it), and plays a toast sound for the killer.
+
+**On-hit effects.** `on-hit:` adds a light touch to every fully charged melee hit (spam-clicking adds nothing): `particle` (any particle without extra data), `particles` (count), `sound`, and with `chance` (percent) a small extra: `effect` on the target (`level` max 5, `duration` max 10 s), `fire` seconds, or `heal` for the attacker (max 4). The limits keep it a style touch rather than a big boost.
 
 **Abilities.** `ability:` gives an item a right-click power with a per-player cooldown:
 

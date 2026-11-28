@@ -1,0 +1,117 @@
+# FemItems chat messages, in MiniMessage format: https://docs.advntr.dev/minimessage/format.html
+# Edit, then run /femitems reload (or /femjukebox reload). A message you delete from this file uses the
+# default again, and the console names it on reload.
+#
+# Words in <angle brackets> that aren't colours or styles are placeholders: FemItems fills them in.
+# The colours used by default: pink #ff7eb6, lavender #c084fc, green #7ee8a2, red #ff6b81, gray #a1a1aa.
+# Item cooldown and ability texts are set per item in items.yml, not here.
+
+# Put in front of every FemItems message. Set it to "" for no prefix.
+prefix: "<dark_gray>[</dark_gray><gradient:#ff7eb6:#c084fc>FemItems</gradient><dark_gray>]</dark_gray> "
+
+items:
+  # /femitems reload worked. <rules>, <recipes>, and <items>: the custom-items part below, only when there are any.
+  reloaded: "<color:#7ee8a2>Config reloaded.</color> <color:#a1a1aa>(<rules> mob rules, <recipes> recipes<items>)</color>"
+  # <count>
+  reloaded-custom-items: ", <count> custom items"
+  reload-in-progress: "<color:#a1a1aa>A reload is already in progress; please wait.</color>"
+
+  # A reload failed. Hovering the message shows the exact problem. <line>; <file> is the content pack file.
+  config-error-at-line: "<color:#ff6b81>Config error at line <line>.</color> <color:#a1a1aa><italic>(hover for details)</italic></color>"
+  config-error: "<color:#ff6b81>Config error; see console.</color> <color:#a1a1aa><italic>(hover for details)</italic></color>"
+  pack-error-at-line: "<color:#ff6b81>Content pack error in <file> at line <line>.</color> <color:#a1a1aa><italic>(hover for details)</italic></color>"
+  pack-error: "<color:#ff6b81>Content pack error in <file>; see console.</color> <color:#a1a1aa><italic>(hover for details)</italic></color>"
+
+  # /femitems items. <count>, <list>.
+  custom-items: "<color:#c084fc>Custom items (<count>):</color> <white><list></white>"
+  custom-items-none: "none - add content packs to plugins/FemItems/contents/"
+  # /femitems give. <id>; <amount>, <target>.
+  unknown-item: "<color:#ff6b81>Unknown custom item: <id></color> <color:#a1a1aa>(see /femitems items)</color>"
+  gave-item: "<color:#7ee8a2>Gave <amount>x <id> to <target>.</color>"
+  players-only: "<color:#ff6b81>Only players can open the item browser.</color>"
+
+  # Sent to everyone when a mob drops an item with `announce: true` in items.yml.
+  # <player>, <item> (hover it to see the item), <mob>. The second one is for drops without a player killer.
+  rare-drop: "<gold>✦</gold> <color:#ff7eb6><player></color> <color:#a1a1aa>got</color> <item> <color:#a1a1aa>from</color> <white><mob></white><color:#a1a1aa>!</color>"
+  rare-drop-no-player: "<gold>✦</gold> <white><mob></white> <color:#a1a1aa>dropped</color> <item><color:#a1a1aa>!</color>"
+
+  # /femitems debug
+  debug-on: "<color:#c084fc>Mob death debug enabled; check console after killing a mob.</color>"
+  debug-off: "<color:#a1a1aa>Mob death debug disabled.</color>"
+
+  # /femitems stats. <sizes>.
+  stats: "<color:#a1a1aa>State:</color> <white><sizes></white>"
+
+  # The resource pack check (/femitems pack, and after a reload). <url>, <file>, <reason>, <sha1>.
+  pack:
+    verified: "<color:#7ee8a2>Resource pack verified; players get it from</color> <white><url></white>"
+    outdated: "<color:#ff6b81>Uploaded resource pack is outdated.</color> <color:#a1a1aa>Upload resourcepack/<file> again and update resource-pack.url, then /femitems pack.</color>"
+    outdated-hover: "Link: <url><newline>Its SHA-1: <sha1>"
+    unreachable: "<color:#ff6b81>Could not download the resource pack:</color> <color:#a1a1aa><reason></color>"
+    unreachable-hover: "Link: <url>"
+    not-configured: "<color:#c084fc>Resource pack not sent yet.</color> <color:#a1a1aa>Upload plugins/FemItems/resourcepack/<file> to mc-packs.net and put its download link in resource-pack.url, then /femitems pack.</color>"
+    checking: "<color:#a1a1aa>Checking the uploaded resource pack...</color>"
+    # <mode>
+    nothing-to-check: "<color:#a1a1aa>Resource pack mode is</color> <white><mode></white><color:#a1a1aa>; nothing to verify.</color>"
+
+  # The /femitems info panel.
+  info:
+    # <version>, <platform>. This line gets the prefix.
+    header: "<white>v<version></white> <color:#a1a1aa>on</color> <color:#c084fc><platform></color>"
+    # <rules>, <recipes>, <debug> (debug-on / debug-off below).
+    stats: "<color:#ff7eb6>  ✦</color> <white><rules></white> <color:#a1a1aa>mob rules ·</color> <white><recipes></white> <color:#a1a1aa>recipes · debug</color> <debug>"
+    debug-on: "<color:#7ee8a2>on</color>"
+    debug-off: "<color:#a1a1aa>off</color>"
+    reload: "reload config.yml and messages.yml"
+    gui: "browse custom items by category"
+    debug: "toggle mob-death diagnostics"
+
+# One command line in the /femitems and /femjukebox help lists. Clicking it fills the command in. <command>, <description>.
+command-line: "<color:#ff7eb6>  ▸</color> <color:#c084fc><command></color> <color:#a1a1aa>— <description></color>"
+# <command>
+command-line-hover: "Click to fill in <command>"
+
+jukebox:
+  # Put in front of every jukebox message. Set it to "" for no prefix.
+  prefix: "<dark_gray>[</dark_gray><gradient:#ff7eb6:#c084fc>FemJukebox</gradient><dark_gray>]</dark_gray> "
+  # <title>
+  now-playing: "<color:#c084fc>Now playing:</color> <white><title></white>"
+  finished: "<color:#a1a1aa>Finished:</color> <white><title></white>"
+  paused: "<color:#a1a1aa>Playback paused.</color>"
+  resumed: "<color:#7ee8a2>Playback resumed.</color>"
+  # Resuming a song played from the resource pack starts it over.
+  resumed-from-start: "<color:#7ee8a2>Playback resumed.</color> <color:#a1a1aa>Resource-pack audio restarts from the beginning.</color>"
+  stopped: "<color:#a1a1aa>Playback stopped.</color>"
+  nothing-playing: "<color:#a1a1aa>Nothing is playing.</color>"
+  nothing-paused: "<color:#a1a1aa>Nothing is paused.</color>"
+  shuffle-on: "<color:#a1a1aa>Shuffle enabled.</color>"
+  shuffle-off: "<color:#a1a1aa>Shuffle disabled.</color>"
+  # <volume> is a percentage, without the % sign.
+  volume: "<color:#a1a1aa>Playback volume: <volume>%</color>"
+  unknown-song: "<color:#ff6b81>Unknown song. Use /femjukebox songs.</color>"
+  players-only: "<color:#ff6b81>Only players can do that.</color>"
+  disc-only: "<color:#ff6b81>Custom disc tracks can only be played by using the disc in a Custom Jukebox.</color>"
+  hold-item: "<color:#ff6b81>Hold the disc you want to map in your main hand.</color>"
+  # /femjukebox songs. <count>, <list>.
+  songs: "<color:#c084fc>Songs (<count>):</color> <white><list></white>"
+  songs-none: "none"
+  # <amount>, <target>, <title>.
+  gave-jukebox: "<color:#7ee8a2>Gave <amount> Custom Jukebox item(s) to <target>.</color>"
+  gave-disc: "<color:#7ee8a2>Gave ♫ <title> to <target>.</color>"
+  mapped: "<color:#7ee8a2>Mapped the held item to <title>.</color>"
+  # /femjukebox reload. <count>. Hovering the failure message shows the exact problem.
+  reloaded: "<color:#7ee8a2>Loaded <count> song(s).</color> <color:#a1a1aa>File changes also reload automatically.</color>"
+  reload-failed: "<color:#ff6b81>Song reload failed; see console.</color>"
+
+  # /femjukebox help: the header line (with the prefix), then one command-line per command.
+  help:
+    header: "<color:#c084fc>Jukebox commands</color>"
+    gui: "open playback controls"
+    songs: "list songs"
+    play: "play a song to yourself and nearby players"
+    controls: "control your playback"
+    shuffle: "toggle random next song"
+    give: "give Custom Jukebox items"
+    disc: "give a mapped disc"
+    map: "map the held item to a song"
+    reload: "convert NBS imports and reload songs"

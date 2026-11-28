@@ -9,7 +9,9 @@ import net.kyori.adventure.resource.ResourcePackInfo
 import net.kyori.adventure.resource.ResourcePackRequest
 import net.kyori.adventure.text.Component
 import net.kyori.adventure.text.format.TextDecoration
+import net.kyori.adventure.text.minimessage.MiniMessage
 import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer
+import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
 import org.bukkit.Keyed
 import org.bukkit.NamespacedKey
 import org.bukkit.attribute.AttributeModifier
@@ -23,7 +25,9 @@ import org.bukkit.event.player.PlayerJoinEvent
 import org.bukkit.inventory.EquipmentSlot
 import org.bukkit.inventory.EquipmentSlotGroup
 import org.bukkit.inventory.ItemStack
+import org.bukkit.inventory.meta.ArmorMeta
 import org.bukkit.inventory.meta.Damageable
+import org.bukkit.inventory.meta.Repairable
 import org.bukkit.inventory.meta.EnchantmentStorageMeta
 import org.bukkit.persistence.PersistentDataType
 import org.bukkit.plugin.java.JavaPlugin
@@ -57,6 +61,10 @@ class LoadedItems(
  */
 class CustomItemService(private val plugin: JavaPlugin) : Listener {
     val itemKey = NamespacedKey(plugin, "item")
+    /** Fingerprint of the definition an item was built from; a different one means it is out of date. */
+    private val versionKey = NamespacedKey(plugin, "item_version")
+    /** The `name:` text it was built with, to tell an anvil rename apart from the default name. */
+    private val baseNameKey = NamespacedKey(plugin, "item_base_name")
     private val packServer = PackServer(plugin.logger)
 
     @Volatile
@@ -67,7 +75,7 @@ class CustomItemService(private val plugin: JavaPlugin) : Listener {
 
     /** Loads content packs and builds item stacks plus the resource pack. Throws [ContentPackException]. */
     fun load(settings: ResourcePackSettings): LoadedItems {
-        val packs = ContentPackLoader(contentsFolder, ::enchantmentExists, ::attributeExists, ::effectExists).load()
+        val packs = ContentPackLoader(contentsFolder, ::enchantmentExists, ::attributeExists, ::effectExists, ::particleExists).load()
         val definitions = LinkedHashMap<String, CustomItemDefinition>()
         for (pack in packs) {
             for (item in pack.items) definitions[item.id] = item
@@ -226,6 +234,8 @@ class CustomItemService(private val plugin: JavaPlugin) : Listener {
         item.editMeta { meta ->
             meta.itemModel = NamespacedKey(definition.namespace, definition.key)
             meta.persistentDataContainer.set(itemKey, PersistentDataType.STRING, definition.id)
+            meta.persistentDataContainer.set(versionKey, PersistentDataType.STRING, fingerprint(definition))
+            meta.persistentDataContainer.set(baseNameKey, PersistentDataType.STRING, definition.name.orEmpty())
             definition.name?.let { meta.displayName(legacy(it)) }
             if (definition.lore.isNotEmpty()) meta.lore(definition.lore.map(::legacy))
             if (definition.unbreakable) meta.isUnbreakable = true
@@ -289,11 +299,65 @@ class CustomItemService(private val plugin: JavaPlugin) : Listener {
         item.setData(DataComponentTypes.ATTRIBUTE_MODIFIERS, builder.build())
     }
 
+    /**
+     * The up-to-date version of a custom item someone already has, after items.yml changed: the current stats,
+     * name, lore and ability, keeping what belongs to that copy (amount, enchantments added to it, wear, anvil
+     * cost, armour trim, an anvil rename, other plugins' data). Null when [old] is current or not a custom item.
+     */
+    fun refreshed(old: ItemStack?): ItemStack? {
+        val id = idOf(old) ?: return null
+        old!!
+        val loaded = current
+        val definition = loaded.definitions[id] ?: return null
+        val template = loaded.templates[id] ?: return null
+        val oldData = old.persistentDataContainer
+        if (oldData.get(versionKey, PersistentDataType.STRING) == fingerprint(definition)) return null
+        val fresh = template.clone()
+        fresh.amount = old.amount
+        val oldMeta = old.itemMeta
+        fresh.editMeta { meta ->
+            for ((enchantment, level) in oldMeta.enchants) {
+                if (meta.getEnchantLevel(enchantment) < level) meta.addEnchant(enchantment, level, true)
+            }
+            if (oldMeta is EnchantmentStorageMeta && meta is EnchantmentStorageMeta) {
+                for ((enchantment, level) in oldMeta.storedEnchants) {
+                    if (meta.getStoredEnchantLevel(enchantment) < level) meta.addStoredEnchant(enchantment, level, true)
+                }
+            }
+            if (oldMeta is Damageable && meta is Damageable && oldMeta.hasDamage()) {
+                val max = if (meta.hasMaxDamage()) meta.maxDamage else fresh.type.maxDurability.toInt()
+                meta.damage = if (max > 0) oldMeta.damage.coerceAtMost(max - 1) else oldMeta.damage
+            }
+            if (oldMeta is Repairable && meta is Repairable && oldMeta.hasRepairCost()) meta.repairCost = oldMeta.repairCost
+            if (oldMeta is ArmorMeta && meta is ArmorMeta && oldMeta.hasTrim()) meta.trim = oldMeta.trim
+            val oldName = oldMeta.displayName()
+            val oldBase = oldData.get(baseNameKey, PersistentDataType.STRING)
+            if (oldName != null && oldBase != null && plain(oldName) != plain(legacy(oldBase))) meta.displayName(oldName)
+            // Other plugins' data stays; FemItems' own keys come from the template.
+            oldData.copyTo(meta.persistentDataContainer, false)
+        }
+        return fresh
+    }
+
+    /** Replaces every out-of-date custom item in [inventory]. Call on the thread that owns it. @return how many */
+    fun refreshAll(inventory: org.bukkit.inventory.Inventory): Int {
+        var count = 0
+        for (slot in 0 until inventory.size) {
+            val fresh = refreshed(inventory.getItem(slot)) ?: continue
+            inventory.setItem(slot, fresh)
+            count++
+        }
+        return count
+    }
+
     private fun enchantmentExists(key: NamespacedKey): Boolean =
         RegistryAccess.registryAccess().getRegistry(RegistryKey.ENCHANTMENT).get(key) != null
 
     private fun effectExists(key: NamespacedKey): Boolean =
         RegistryAccess.registryAccess().getRegistry(RegistryKey.MOB_EFFECT).get(key) != null
+
+    private fun particleExists(name: String): Boolean =
+        runCatching { org.bukkit.Particle.valueOf(name) }.getOrNull()?.let { it.dataType == Void::class.java } ?: false
 
     private fun attributeExists(key: NamespacedKey): Boolean =
         RegistryAccess.registryAccess().getRegistry(RegistryKey.ATTRIBUTE).get(key) != null
@@ -302,9 +366,22 @@ class CustomItemService(private val plugin: JavaPlugin) : Listener {
         /** Stable id: a re-sent pack replaces the previous FemItems pack on the client instead of stacking. */
         val PACK_ID: UUID = UUID.nameUUIDFromBytes("femitems:custom-items".toByteArray())
 
-        fun legacy(text: String): Component =
-            LegacyComponentSerializer.legacyAmpersand().deserialize(text)
-                .decorationIfAbsent(TextDecoration.ITALIC, TextDecoration.State.FALSE)
+        private val MINI_TAG = Regex("""<[a-z#!/][^<>]*>""")
+
+        /**
+         * Item names, lore and ability texts: MiniMessage when they contain a tag (`<gradient:#f0f:#0ff>`, `<bold>`),
+         * otherwise `&` colour codes. Not italic unless asked for, like vanilla custom names.
+         */
+        fun legacy(text: String): Component {
+            val component = if (MINI_TAG.containsMatchIn(text)) MiniMessage.miniMessage().deserialize(text)
+            else LegacyComponentSerializer.legacyAmpersand().deserialize(text)
+            return component.decorationIfAbsent(TextDecoration.ITALIC, TextDecoration.State.FALSE)
+        }
+
+        private fun plain(component: Component): String = PlainTextComponentSerializer.plainText().serialize(component)
+
+        /** Stable across restarts (enum names, not identity hashes): changes whenever the definition does. */
+        fun fingerprint(definition: CustomItemDefinition): String = Integer.toHexString(definition.toString().hashCode())
 
         private fun equipmentSlot(slot: ArmorSlot): EquipmentSlot = when (slot) {
             ArmorSlot.HEAD -> EquipmentSlot.HEAD

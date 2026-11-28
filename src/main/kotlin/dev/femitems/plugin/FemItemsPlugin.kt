@@ -77,6 +77,9 @@ class FemItemsPlugin : JavaPlugin(), Listener {
     /** Right-click item abilities (`ability:` in items.yml) and their per-player cooldowns. */
     private val abilities = AbilityService(this, customItems)
 
+    /** Item refresh, soulbound and on-hit effects. */
+    private val perks = dev.femitems.plugin.items.ItemPerkService(this, customItems)
+
     /** NBS music & Custom Jukebox feature (formerly the standalone FemJukebox plugin). */
     private var jukebox: JukeboxFeature? = null
 
@@ -86,6 +89,7 @@ class FemItemsPlugin : JavaPlugin(), Listener {
         server.pluginManager.registerEvents(customItems, this)
         server.pluginManager.registerEvents(itemBrowser, this)
         server.pluginManager.registerEvents(abilities, this)
+        server.pluginManager.registerEvents(perks, this)
 
         val platform = if (isFolia()) "Folia" else "Paper"
         logger.info("Initializing FemItems ${pluginMeta.version} on $platform.")
@@ -173,7 +177,7 @@ class FemItemsPlugin : JavaPlugin(), Listener {
             .then(
                 Commands.literal("stats").executes { context ->
                     val sizes = (jukebox?.music?.stateSizes() ?: emptyMap()) +
-                        mapOf("ability_players" to abilities.trackedPlayers(), "custom_items" to customItems.current.count, "recipes" to registeredRecipeKeys.size)
+                        mapOf("ability_players" to abilities.trackedPlayers(), "swing_players" to perks.trackedSwings(), "custom_items" to customItems.current.count, "recipes" to registeredRecipeKeys.size)
                     context.source.sender.sendMessage(Messages.stats(sizes))
                     Command.SINGLE_SUCCESS
                 },
@@ -304,6 +308,7 @@ class FemItemsPlugin : JavaPlugin(), Listener {
             server.globalRegionScheduler.execute(this) {
                 try {
                     applyContent(content)
+                    perks.refreshOnline()
                     sender.sendMessage(Messages.reloaded(content.mobRules.size, content.definitionCount, content.items.count))
                     customItems.checkExternalPack(sender::sendMessage)
                 } catch (exception: Exception) {
@@ -322,6 +327,8 @@ class FemItemsPlugin : JavaPlugin(), Listener {
     /** Thread-agnostic: reads and validates config.yml and builds every recipe without touching live state. */
     private fun loadContent(): LoadResult {
         val configFile = File(dataFolder, "config.yml")
+        // messages.yml can't fail a reload: anything wrong in it falls back to the default text.
+        MessageTexts.load(this)
         return try {
             val newConfig = YamlConfiguration()
             newConfig.load(configFile)
@@ -552,6 +559,7 @@ class FemItemsPlugin : JavaPlugin(), Listener {
             val template = if (drop.customItem != null) {
                 val item = customItems.create(drop.customItem) ?: continue
                 if (drop.enchants.isNotEmpty()) addEnchants(item, drop.enchants)
+                if (customItems.current.definitions[drop.customItem]?.announce == true) announceDrop(entity, item)
                 item
             } else if (drop.randomEnchantment) {
                 createRandomEnchantedBook(drop.name)
@@ -562,6 +570,22 @@ class FemItemsPlugin : JavaPlugin(), Listener {
                 event.drops.add(template.clone().apply { amount = stackSize })
             }
         }
+    }
+
+    /** `announce: true` items: tells the whole server who got it, and plays a sound for the killer. */
+    private fun announceDrop(entity: org.bukkit.entity.LivingEntity, item: ItemStack) {
+        val mob = entity.customName() ?: Component.translatable(entity.type.translationKey())
+        val killer = entity.killer
+        // "[Name]" with the item on hover. Built here: ItemStack.displayName() is a translatable wrapper.
+        val name = Component.text().append(Component.text("[")).append(item.effectiveName()).append(Component.text("]"))
+            .hoverEvent(item.asHoverEvent()).build()
+        val message = Messages.rareDrop(killer?.name, name, mob)
+        // Sent to each player directly: on Folia, server.broadcast skipped players in other regions.
+        for (player in server.onlinePlayers) player.sendMessage(message)
+        server.consoleSender.sendMessage(message)
+        killer?.scheduler?.run(this, {
+            killer.playSound(killer.location, org.bukkit.Sound.UI_TOAST_CHALLENGE_COMPLETE, org.bukkit.SoundCategory.PLAYERS, 0.7f, 1.0f)
+        }, null)
     }
 
     /** Adds [enchants] to [item] (as stored enchantments on enchanted books), on top of what it already has. */

@@ -257,6 +257,39 @@ class LiveServerFakePlayerIT {
                         "[$platform] Reloads with unchanged recipes caused $unchangedResyncs recipe resyncs",
                     )
 
+                    // 5d. messages.yml: saved on first start; edited texts reach the player after a reload, for both
+                    //     FemItems and jukebox messages; deleted texts are reported and use the default again.
+                    val messagesFile = server.pluginDataDir().resolve("messages.yml")
+                    assertTrue(Files.exists(messagesFile), "[$platform] messages.yml should be saved on first start")
+                    val defaultMessages = Files.readString(messagesFile, StandardCharsets.UTF_8)
+                    Files.writeString(
+                        messagesFile,
+                        """
+                        prefix: "<gold>[Items]</gold> "
+                        items:
+                          reloaded: "<green>Reloaded! <rules> rules / <recipes> recipes<items>"
+                        jukebox:
+                          nothing-playing: "<gray>Silence.</gray>"
+                        """.trimIndent() + "\n",
+                        StandardCharsets.UTF_8,
+                    )
+                    val opChatBeforeMessages = opPlayer.chatCount()
+                    val logBeforeMessages = server.readLog().length
+                    opPlayer.sendCommand("femitems reload")
+                    opPlayer.awaitChatContaining("[Items] Reloaded! 1 rules / 3 recipes", sinceIndex = opChatBeforeMessages)
+                    opPlayer.sendCommand("femjukebox stop")
+                    opPlayer.awaitChatContaining("[FemJukebox] Silence.", sinceIndex = opChatBeforeMessages)
+                    val messagesLog = server.readLog().substring(logBeforeMessages)
+                    assertTrue(
+                        messagesLog.contains("[messages.yml] 'jukebox.prefix' is missing"),
+                        "[$platform] Expected the deleted jukebox.prefix to be reported:\n$messagesLog",
+                    )
+                    // Back to the default file: the default texts return.
+                    Files.writeString(messagesFile, defaultMessages, StandardCharsets.UTF_8)
+                    val opChatBeforeDefaults = opPlayer.chatCount()
+                    opPlayer.sendCommand("femitems reload")
+                    opPlayer.awaitChatContaining("[FemItems] Config reloaded. (1 mob rules, 3 recipes)", sinceIndex = opChatBeforeDefaults)
+
                     // Allow 1-tick entity.scheduler recipe discovery task to complete for online players
                     Thread.sleep(500)
 
@@ -1242,6 +1275,72 @@ class LiveServerFakePlayerIT {
             op.healthSince(strikeHealthMark).none { it < beforeStrike - 0.01f },
             "[$platform] The lightning ability hurt its own caster: ${op.healthSince(strikeHealthMark)}",
         )
+
+        // C13. Items people already have update on reload, keeping what was added to that copy (an enchantment).
+        var mark = op.chatCount()
+        op.sendCommand("enchant @s minecraft:sharpness 2")
+        op.awaitChatContaining("commands.enchant.success", sinceIndex = mark)
+        val itemsFile = pack.resolve("items.yml")
+        Files.writeString(
+            itemsFile,
+            Files.readString(itemsFile)
+                .replace("    attack-speed: 2\n", "    attack-speed: 2.5\n    soulbound: true\n" +
+                    "    on-hit: { particle: flame, sound: block.amethyst_block.chime, effect: slowness, duration: 2 }\n")
+                .replace("    texture: item/raw_ruby\n", "    texture: item/raw_ruby\n    announce: true\n"),
+        )
+        mark = op.chatCount()
+        val slotsBeforeRefresh = op.slotUpdateCount()
+        op.sendCommand("femitems reload")
+        op.awaitChatContaining("[FemItems] Config reloaded.", sinceIndex = mark)
+        op.awaitSlotUpdate("the held ruby sword refreshed, still enchanted", sinceIndex = slotsBeforeRefresh) { update ->
+            val components = update.item?.dataComponentsPatch?.toString().orEmpty()
+            components.contains("livetest:ruby_sword") && Regex("(?<!stored_)enchantments").containsMatchIn(components)
+        }
+        op.awaitOwnAttribute("minecraft:attack_speed", 2.5) // the new stat reached the copy in hand
+
+        // C14. On-hit: a fully charged hit plays the sound (and slows); a spam-click right after it adds nothing.
+        val hitPig = summonPig()
+        Thread.sleep(1000) // full swing
+        val soundMark = op.soundCount()
+        val pigHealthMark = op.entityHealthCount()
+        op.attack(hitPig)
+        op.attack(hitPig)
+        op.awaitEntityHealth(hitPig, sinceIndex = pigHealthMark) { it < 100f }
+        op.awaitSoundContaining("amethyst_block.chime", sinceIndex = soundMark)
+        Thread.sleep(1000)
+        assertEquals(
+            1, op.soundsSince(soundMark).count { it.name.contains("amethyst_block.chime") },
+            "[$platform] Only the fully charged hit should play the on-hit sound",
+        )
+        op.sendCommand("kill @e[type=minecraft:pig,distance=..20]")
+
+        // C15. announce: true - a player's kill dropping it is told to everyone, and the killer hears a toast.
+        mark = op.chatCount()
+        val guestMark = guest.chatCount()
+        val toastMark = op.soundCount()
+        server.sendConsoleCommand("""execute at FakeOp run summon minecraft:zombie ~ ~ ~2 {Tags:["femitems.test_ruby","femitems.announce"],CustomName:"Ruby Golem",NoAI:1b,Silent:1b}""")
+        Thread.sleep(800)
+        server.sendConsoleCommand("damage @e[type=minecraft:zombie,tag=femitems.announce,limit=1] 1000 minecraft:player_attack by FakeOp")
+        val announcement = "[FemItems] ✦ FakeOp got [Raw Ruby] from Ruby Golem!"
+        op.awaitChatContaining(announcement, sinceIndex = mark)
+        guest.awaitChatContaining(announcement, sinceIndex = guestMark)
+        op.awaitSoundContaining("toast.challenge_complete", sinceIndex = toastMark)
+
+        // C16. Soulbound: the ruby sword stays through death; ordinary items still drop.
+        server.sendConsoleCommand("give FakeOp minecraft:dirt 3")
+        Thread.sleep(500)
+        val deaths = op.deathCount()
+        server.sendConsoleCommand("kill FakeOp")
+        val deathDeadline = System.currentTimeMillis() + 10_000
+        while (op.deathCount() == deaths && System.currentTimeMillis() < deathDeadline) Thread.sleep(50)
+        assertTrue(op.deathCount() > deaths, "[$platform] FakeOp did not die")
+        Thread.sleep(1500) // respawned
+        assertTrue(
+            conditional(op, """execute if items entity @s container.* *[minecraft:item_model="livetest:ruby_sword"]"""),
+            "[$platform] The soulbound ruby sword was not kept on death",
+        )
+        assertTrue(!conditional(op, "execute if items entity @s container.* minecraft:dirt"), "[$platform] Ordinary items should still drop")
+        server.sendConsoleCommand("kill @e[type=minecraft:item]")
         op.selectHotbarSlot(0)
     }
 

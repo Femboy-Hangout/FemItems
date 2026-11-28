@@ -247,6 +247,17 @@ class FakePlayerClient(
 
                     is ClientboundSetHealthPacket -> ownHealth.add(packet.health)
 
+                    // Dying shows the death screen; press "Respawn" right away, like a player would.
+                    is org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.player.ClientboundPlayerCombatKillPacket ->
+                        if (packet.playerId == ownEntityId.get()) {
+                            deaths.incrementAndGet()
+                            session.send(
+                                org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.ServerboundClientCommandPacket(
+                                    org.geysermc.mcprotocollib.protocol.data.game.ClientCommand.PERFORM_RESPAWN,
+                                ),
+                            )
+                        }
+
                     is ClientboundUpdateMobEffectPacket -> if (packet.entityId == ownEntityId.get()) {
                         ownEffects.add("${packet.effect}:${packet.amplifier}")
                     }
@@ -332,6 +343,11 @@ class FakePlayerClient(
     }
 
     fun chatCount(): Int = chatMessages.count()
+
+    private val deaths = java.util.concurrent.atomic.AtomicInteger()
+
+    /** How often this player died (and respawned). */
+    fun deathCount(): Int = deaths.get()
 
     fun chatMessagesSnapshot(): List<String> = chatMessages.snapshot()
 
@@ -524,6 +540,8 @@ class FakePlayerClient(
         awaitEvent(entityHealth, "health update of entity $entityId", sinceIndex, timeout) { it.entityId == entityId && predicate(it.health) }
 
     fun soundCount(): Int = sounds.count()
+
+    fun soundsSince(index: Int): List<CapturedSound> = sounds.snapshotSince(index)
 
     fun stoppedSoundCount(): Int = stoppedSounds.count()
 

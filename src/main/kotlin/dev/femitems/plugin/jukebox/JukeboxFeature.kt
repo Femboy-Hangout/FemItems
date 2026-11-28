@@ -69,7 +69,10 @@ class JukeboxFeature(private val plugin: JavaPlugin) {
 
     /** `/femjukebox reload`: converts NBS imports and reloads songs on the AsyncScheduler. */
     fun reloadAsync(onDone: (Result<Int>) -> Unit) {
-        plugin.server.asyncScheduler.runNow(plugin) { onDone(runCatching(::reload)) }
+        plugin.server.asyncScheduler.runNow(plugin) {
+            dev.femitems.plugin.MessageTexts.load(plugin)
+            onDone(runCatching(::reload))
+        }
     }
 
     /** One-time copy of `plugins/FemJukebox/` (songs, mappings, config) into `plugins/FemItems/jukebox/`. */

@@ -109,6 +109,26 @@ data class ItemAbility(
 }
 
 /**
+ * A light, mostly cosmetic effect on every fully charged melee hit (`on-hit:` in items.yml): [particle] and
+ * [sound] always, and with [chancePercent] a small extra: a potion [effect] on the target, [fireSeconds] of fire,
+ * or [heal] health for the attacker.
+ */
+data class OnHitEffect(
+    /** Bukkit particle name (e.g. `SNOWFLAKE`); null = none. */
+    val particle: String? = null,
+    val particleCount: Int = 8,
+    /** Sound key (e.g. `minecraft:block.amethyst_block.chime`); null = none. */
+    val sound: String? = null,
+    /** 0-100: how often the extra (effect / fire / heal) happens. */
+    val chancePercent: Double = 100.0,
+    val effect: NamespacedKey? = null,
+    val level: Int = 1,
+    val durationSeconds: Double = 1.0,
+    val fireSeconds: Double = 0.0,
+    val heal: Double = 0.0,
+)
+
+/**
  * Headline stats, written as the total the tooltip shows (`attack-damage: 12` = "12 Attack Damage").
  * Each one replaces the base item's own value for that attribute. [playerBase] is the player's base
  * value, which vanilla adds to the item modifier for display, so the modifier is `value - playerBase`.
@@ -149,6 +169,12 @@ data class CustomItemDefinition(
     val category: String? = null,
     /** Right-click ability (see [ItemAbility]); null = none. */
     val ability: ItemAbility? = null,
+    /** Light effect on every fully charged hit (see [OnHitEffect]); null = none. */
+    val onHit: OnHitEffect? = null,
+    /** Kept on death instead of dropping. */
+    val soulbound: Boolean = false,
+    /** Announced to the whole server when a mob drops it. */
+    val announce: Boolean = false,
     /** Equipment asset id (`namespace:name`) giving the worn texture, for armour. */
     val equipment: String?,
     val armorSlot: ArmorSlot?,
@@ -183,6 +209,8 @@ class ContentPackLoader(
     private val enchantmentExists: (NamespacedKey) -> Boolean,
     private val attributeExists: (NamespacedKey) -> Boolean,
     private val effectExists: (NamespacedKey) -> Boolean = { true },
+    /** A particle name that can be spawned without extra data. */
+    private val particleExists: (String) -> Boolean = { true },
 ) {
     fun load(): List<ContentPack> {
         if (!Files.isDirectory(contentsFolder)) return emptyList()
@@ -319,6 +347,9 @@ class ContentPackLoader(
                 if (it.length > 32) throw ContentPackException(file, "$where.category must be at most 32 characters")
             },
             ability = section.get("ability")?.let { readAbility(section.getConfigurationSection("ability"), "$where.ability", file) },
+            onHit = section.get("on-hit")?.let { readOnHit(section.getConfigurationSection("on-hit"), "$where.on-hit", file) },
+            soulbound = flag(section, "soulbound", where, file),
+            announce = flag(section, "announce", where, file),
             equipment = equipment,
             armorSlot = armorSlot,
         )
@@ -394,6 +425,46 @@ class ContentPackLoader(
         }
     }
 
+    private fun flag(section: ConfigurationSection, path: String, where: String, file: File): Boolean {
+        val value = section.get(path) ?: return false
+        return value as? Boolean ?: throw ContentPackException(file, "$where.$path must be true or false")
+    }
+
+    private fun readOnHit(section: ConfigurationSection?, where: String, file: File): OnHitEffect {
+        if (section == null) throw ContentPackException(file, "$where must be a section (options: ${ON_HIT_OPTIONS.joinToString(", ")})")
+        for (option in section.getKeys(false)) {
+            if (option !in ON_HIT_OPTIONS) throw ContentPackException(file, "$where.$option: unknown option (options: ${ON_HIT_OPTIONS.joinToString(", ")})")
+        }
+        fun ranged(path: String, default: Double, range: ClosedFloatingPointRange<Double>): Double {
+            val value = section.get(path) ?: return default
+            val number = number(value) ?: throw ContentPackException(file, "$where.$path must be a number")
+            if (number !in range) throw ContentPackException(file, "$where.$path must be ${fmt(range.start)} to ${fmt(range.endInclusive)}")
+            return number
+        }
+        val particle = section.getString("particle")?.trim()?.uppercase(Locale.ROOT)?.takeIf(String::isNotEmpty)?.also {
+            if (!particleExists(it)) throw ContentPackException(file, "$where.particle: unknown particle '$it' (or one that needs extra data, like DUST)")
+        }
+        val sound = section.getString("sound")?.trim()?.lowercase(Locale.ROOT)?.takeIf(String::isNotEmpty)?.also {
+            if (NamespacedKey.fromString(it) == null) throw ContentPackException(file, "$where.sound: invalid sound '$it'")
+        }
+        val effect = section.getString("effect")?.let { name ->
+            val key = minecraftKey(name) ?: throw ContentPackException(file, "$where.effect: invalid key '$name'")
+            if (!effectExists(key)) throw ContentPackException(file, "$where.effect: unknown effect '$name'")
+            key
+        }
+        return OnHitEffect(
+            particle = particle,
+            particleCount = ranged("particles", 8.0, 1.0..50.0).toInt(),
+            sound = sound,
+            chancePercent = ranged("chance", 100.0, 0.0..100.0),
+            effect = effect,
+            level = ranged("level", 1.0, 1.0..5.0).toInt(),
+            durationSeconds = ranged("duration", 1.0, 0.05..10.0),
+            fireSeconds = ranged("fire", 0.0, 0.0..10.0),
+            heal = ranged("heal", 0.0, 0.0..4.0),
+        )
+    }
+
     private fun validate(pack: ContentPack) {
         val file = pack.folder.resolve("items.yml").toFile()
         val equipmentIds = pack.equipment.map(EquipmentDefinition::id).toSet()
@@ -459,9 +530,10 @@ class ContentPackLoader(
         /** Every option an item section may have; anything else is a typo and is reported. */
         val ITEM_OPTIONS: List<String> = listOf(
             "name", "lore", "material", "texture", "model", "max-durability", "max-stack-size", "unbreakable",
-            "enchants", "attributes", "equipment", "slot", "category", "ability",
+            "enchants", "attributes", "equipment", "slot", "category", "ability", "on-hit", "soulbound", "announce",
         ) + ItemStat.entries.map(ItemStat::configName)
         private val ABILITY_OPTIONS = listOf("type", "cooldown", "cooldown-message")
+        private val ON_HIT_OPTIONS = listOf("particle", "particles", "sound", "chance", "effect", "level", "duration", "fire", "heal")
         private val OPTION_HINTS = mapOf(
             "damage" to "attack-damage", "attack_damage" to "attack-damage", "attack-dmg" to "attack-damage",
             "speed" to "attack-speed", "attack_speed" to "attack-speed",
@@ -470,6 +542,7 @@ class ContentPackLoader(
             "durability" to "max-durability", "max_durability" to "max-durability",
             "stack-size" to "max-stack-size", "max_stack_size" to "max-stack-size",
             "enchantments" to "enchants", "attribute" to "attributes", "display-name" to "name",
+            "onhit" to "on-hit", "on_hit" to "on-hit", "soul-bound" to "soulbound", "soulbind" to "soulbound",
         )
         private val ATTRIBUTE_OPTIONS = setOf("amount", "operation", "slot")
         /** Vanilla equipment slot group names (`EquipmentSlotGroup.getByName`). */

@@ -749,4 +749,77 @@ class CustomItemsTest {
         assertEquals(listOf(0.0), Abilities.spread(1, 30.0))
         assertEquals(listOf(-15.0, -7.5, 0.0, 7.5, 15.0), Abilities.spread(5, 30.0))
     }
+
+    @Test
+    fun `on-hit, soulbound and announce are read, with light limits`(@TempDir root: Path) {
+        pack(
+            root, "ns",
+            """
+            items:
+              frost:
+                material: DIAMOND_AXE
+                texture: t
+                soulbound: true
+                announce: true
+                on-hit: { particle: snowflake, particles: 10, sound: block.glass.break, chance: 15, effect: slowness, duration: 1.5 }
+              plain:
+                material: PAPER
+                texture: t
+            """,
+            "t",
+        )
+        val items = ContentPackLoader(
+            root, { true }, { true }, effectExists = { it.key == "slowness" }, particleExists = { it == "SNOWFLAKE" },
+        ).load().single().items.associateBy { it.key }
+        val frost = items.getValue("frost")
+        assertTrue(frost.soulbound)
+        assertTrue(frost.announce)
+        assertEquals(
+            OnHitEffect(
+                particle = "SNOWFLAKE", particleCount = 10, sound = "block.glass.break", chancePercent = 15.0,
+                effect = NamespacedKey.minecraft("slowness"), durationSeconds = 1.5,
+            ),
+            frost.onHit,
+        )
+        val plain = items.getValue("plain")
+        assertTrue(!plain.soulbound && !plain.announce && plain.onHit == null)
+
+        fun error(option: String): String {
+            val folder = root.resolve("e-${System.nanoTime()}")
+            pack(folder, "ns", "items:\n  a:\n    material: PAPER\n    texture: t\n    $option\n", "t")
+            return assertFailsWith<ContentPackException> {
+                ContentPackLoader(folder, { true }, { true }, particleExists = { it == "FLAME" }).load()
+            }.message!!
+        }
+        assertContains(error("on-hit: { particle: dust }"), "on-hit.particle: unknown particle 'DUST'")
+        assertContains(error("on-hit: { heal: 10 }"), "on-hit.heal must be 0 to 4")
+        assertContains(error("on-hit: { level: 9 }"), "on-hit.level must be 1 to 5")
+        assertContains(error("on-hit: { colour: red }"), "on-hit.colour: unknown option")
+        assertContains(error("soulbound: yes please"), "soulbound must be true or false")
+        assertContains(error("soul-bound: true"), "did you mean soulbound?")
+    }
+
+    @Test
+    fun `the item fingerprint changes when the definition does and is stable otherwise`(@TempDir root: Path) {
+        fun definition(damage: String): CustomItemDefinition {
+            val folder = root.resolve("f-${System.nanoTime()}")
+            pack(folder, "ns", "items:\n  a:\n    material: DIAMOND_SWORD\n    texture: t\n    attack-damage: $damage\n", "t")
+            return loader(folder).load().single().items.single()
+        }
+        assertEquals(CustomItemService.fingerprint(definition("9")), CustomItemService.fingerprint(definition("9")))
+        assertNotEquals(CustomItemService.fingerprint(definition("9")), CustomItemService.fingerprint(definition("10")))
+    }
+
+    @Test
+    fun `item texts take MiniMessage gradients or ampersand codes`() {
+        val plain = PlainTextComponentSerializer.plainText()
+        val mini = CustomItemService.legacy("<gradient:#9d4edd:#48cae4><bold>Cosmic Sword</bold></gradient>")
+        assertEquals("Cosmic Sword", plain.serialize(mini))
+        assertEquals("Frost Axe", plain.serialize(CustomItemService.legacy("&b&lFrost Axe")))
+        assertEquals("a < b", plain.serialize(CustomItemService.legacy("a < b")), "a lone < is plain text")
+        assertEquals(
+            net.kyori.adventure.text.format.TextDecoration.State.FALSE,
+            mini.decoration(net.kyori.adventure.text.format.TextDecoration.ITALIC),
+        )
+    }
 }
